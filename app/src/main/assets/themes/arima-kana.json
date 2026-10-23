@@ -3,6 +3,7 @@
   "name": "Crimson Kana",
   "description": "Kızıl ve siyah. Gün batımında şehrin üstünde bir çatı.",
   "wallpaper": "arima-kana.jpg",
+  "focusX": 0.8,
   "colors": {
     "base": "#0D080C",
     "chromeTint": "#140A10",

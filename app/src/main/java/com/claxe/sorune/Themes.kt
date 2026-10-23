@@ -10,6 +10,8 @@ data class SoruneTheme(
     val name: String,
     val description: String,
     val wallpaper: String?,
+    /** Where the character stands in the wallpaper (0 = left, 1 = right): kept in view on narrow screens. */
+    val focusX: Float,
     val base: Int,
     val chromeTint: Int,
     val chromeTintOpacity: Float,
@@ -25,6 +27,18 @@ data class SoruneTheme(
 
 object Themes {
     const val DEFAULT_ID = "midnight-mei"
+
+    /**
+     * Crops a wallpaper like "cover" but keeps the focus point in the middle of the screen where
+     * possible: a phone held upright shows only a narrow slice of a wide picture.
+     */
+    fun focusMatrix(imageWidth: Int, imageHeight: Int, viewWidth: Int, viewHeight: Int, focusX: Float): android.graphics.Matrix {
+        val scale = maxOf(viewWidth.toFloat() / imageWidth, viewHeight.toFloat() / imageHeight)
+        val scaledWidth = imageWidth * scale
+        val dx = (viewWidth / 2f - focusX * scaledWidth).coerceIn(viewWidth - scaledWidth, 0f)
+        val dy = (viewHeight - imageHeight * scale) / 2f
+        return android.graphics.Matrix().apply { setScale(scale, scale); postTranslate(dx, dy) }
+    }
 
     /** Pages reach the theme files under this address (served from the app's assets). */
     const val ASSET_ORIGIN = "https://appassets.androidplatform.net"
@@ -55,6 +69,7 @@ object Themes {
             name = root.getString("name"),
             description = root.optString("description"),
             wallpaper = root.optString("wallpaper").takeIf { it.isNotEmpty() },
+            focusX = root.optDouble("focusX", 0.5).toFloat().coerceIn(0f, 1f),
             base = Color.parseColor(c("base")),
             chromeTint = Color.parseColor(c("chromeTint", c("base"))),
             chromeTintOpacity = root.optDouble("chromeTintOpacity", 0.72).toFloat(),

@@ -3,6 +3,7 @@
   "name": "Tempest Blue",
   "description": "Lacivert, buz mavisi ve turkuaz. Yüzen adalar ve fantastik bir gökyüzü.",
   "wallpaper": "tempest-blue.jpg",
+  "focusX": 0.74,
   "colors": {
     "base": "#070C18",
     "chromeTint": "#0A1222",

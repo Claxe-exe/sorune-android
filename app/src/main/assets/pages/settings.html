@@ -38,6 +38,22 @@
         </section>
 
         <section class="card">
+            <h2>Çeviri</h2>
+            <p class="hint">Sayfa ve ekran çevirisi ⋮ menüsünde. Ekran çevirisi resimlerdeki yazıları da çevirir (ekranın görüntüsü Google Çeviri'ye gider).</p>
+            <div class="row">
+                <div>
+                    <span class="label">Otomatik ekran çevirisi</span>
+                    <span class="hint">Sayfa durduğunda ve ekran değiştiğinde kendiliğinden çevirir; aynı ekranı iki kez göndermez. Webtoon okurken sadece kaydır.</span>
+                </div>
+                <button type="button" class="switch" id="auto" role="switch" aria-label="Otomatik ekran çevirisi"></button>
+            </div>
+            <div class="slider-row">
+                <span class="label" id="auto-seconds-label"></span>
+                <input type="range" id="auto-seconds" min="3" max="20" step="1" aria-label="Otomatik çevirinin ekrana bakma sıklığı">
+            </div>
+        </section>
+
+        <section class="card">
             <h2>Güncellemeler</h2>
             <p class="hint">Sorune yeni sürümü kendisi bulur ve indirir; kurmak için tek dokunuş yeter.</p>
             <button type="button" class="btn" id="check">Güncellemeleri denetle</button>

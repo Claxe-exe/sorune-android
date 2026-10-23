@@ -13,6 +13,8 @@
 
 - Sekmeler, adres çubuğu, arama motoru önerileri (Google, DuckDuckGo, Bing, Brave)
 - Masaüstüyle aynı **Sorune temaları**: duvar kâğıdı, renkler ve yeni sekme sayfası
+- **Sayfa çevirisi** (Google Çeviri, yerinde) ve **ekran çevirisi**: resimlerdeki yazılar dahil, webtoon okumak için;
+  istersen **otomatik**, 3–20 saniyede bir ekran değişince
 - Tam ekran video, dosya indirme, dosya yükleme, masaüstü sitesi modu
 - Uygulama içi güncelleme (GitHub sürümlerinden)
 

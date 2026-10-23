@@ -35,7 +35,22 @@ function renderSettings(state) {
 
     $("suggest").setAttribute("aria-checked", String(Boolean(state.suggest)));
     $("suggest").onclick = () => send({ type: "setSuggest", value: !state.suggest });
+
+    $("auto").setAttribute("aria-checked", String(Boolean(state.autoScreen)));
+    $("auto").onclick = () => send({ type: "setAutoScreen", value: !state.autoScreen });
+    if (!draggingSeconds) $("auto-seconds").value = state.autoSeconds || 10;
+    showSeconds(Number($("auto-seconds").value));
 }
+
+let draggingSeconds = false;
+function showSeconds(seconds) {
+    $("auto-seconds-label").textContent = `Her ${seconds} saniyede bak`;
+}
+$("auto-seconds").addEventListener("input", () => { draggingSeconds = true; showSeconds(Number($("auto-seconds").value)); });
+$("auto-seconds").addEventListener("change", () => {
+    draggingSeconds = false;
+    send({ type: "setAutoSeconds", value: Number($("auto-seconds").value) });
+});
 
 onAppMessage((message) => {
     if (message.type === "settings") renderSettings(message);

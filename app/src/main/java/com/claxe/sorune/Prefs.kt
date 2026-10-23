@@ -19,6 +19,16 @@ class Prefs(context: Context) {
         get() = store.getBoolean("suggest", true)
         set(value) = store.edit().putBoolean("suggest", value).apply()
 
+    /** Translate the screen by itself when it changes (from the menu). */
+    var autoScreenTranslate: Boolean
+        get() = store.getBoolean("autoScreen", false)
+        set(value) = store.edit().putBoolean("autoScreen", value).apply()
+
+    /** How often automatic screen translation looks, 3–20 seconds. */
+    var autoScreenSeconds: Int
+        get() = store.getInt("autoScreenSeconds", 10).coerceIn(3, 20)
+        set(value) = store.edit().putInt("autoScreenSeconds", value.coerceIn(3, 20)).apply()
+
     /** When updates were last looked for (ms); checked at most every few hours. */
     var lastUpdateCheck: Long
         get() = store.getLong("updateCheck", 0)

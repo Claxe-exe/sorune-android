@@ -3,6 +3,7 @@
   "name": "Midnight Mei",
   "description": "Siyah, antrasit ve koyu mor. Gizemli, sakin, gotik bir gece.",
   "wallpaper": "midnight-mei.jpg",
+  "focusX": 0.75,
   "colors": {
     "base": "#0B0910",
     "chromeTint": "#100C17",

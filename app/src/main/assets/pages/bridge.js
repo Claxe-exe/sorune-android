@@ -38,5 +38,26 @@ function applyTheme(theme) {
     if (wall && theme.wallpaper) {
         root.setProperty("--wallpaper", `url("${theme.wallpaper}")`);
         wall.classList.add("ready");
+        focusWallpaper(theme.wallpaper, typeof theme.focusX === "number" ? theme.focusX : 0.5);
     }
 }
+
+// A phone held upright sees a narrow slice of a wide wallpaper: slide it so the character
+// (theme.focusX across the picture) sits in the middle of the screen.
+let focus = null;
+function focusWallpaper(url, focusX) {
+    const image = new Image();
+    image.onload = () => {
+        focus = { ratio: image.naturalWidth / image.naturalHeight, x: focusX };
+        placeWallpaper();
+    };
+    image.src = url;
+}
+
+function placeWallpaper() {
+    if (!focus) return;
+    const visible = (innerWidth / innerHeight) / focus.ratio; // share of the picture's width on screen
+    const position = visible >= 1 ? 0.5 : Math.min(1, Math.max(0, (focus.x - visible / 2) / (1 - visible)));
+    document.documentElement.style.setProperty("--wall-x", (position * 100).toFixed(1) + "%");
+}
+addEventListener("resize", placeWallpaper);

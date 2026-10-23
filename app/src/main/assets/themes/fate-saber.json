@@ -3,6 +3,7 @@
   "name": "Fate Saber",
   "description": "Kraliyet laciverti ve altın. Ay ışığında bir kale balkonu.",
   "wallpaper": "fate-saber.jpg",
+  "focusX": 0.82,
   "colors": {
     "base": "#080B17",
     "chromeTint": "#0B1020",

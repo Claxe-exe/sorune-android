@@ -84,7 +84,16 @@ class MainActivity : AppCompatActivity() {
         var desktopMode = false
         /** Answers Sorune's own pages (new tab, settings) on the page's message channel. */
         var reply: JavaScriptReplyProxy? = null
+        /** Page translation: on while set; stays on for the tab's next pages, like Chrome. */
+        var translateTarget: String? = null
+        var translatedFrom: String? = null
+        var translating = false
+        /** The last screen automatic translation handled (so the same screen is never sent twice). */
+        var autoView: String? = null
     }
+
+    private lateinit var translationChip: TextView
+    private var screenTranslating = false
 
     private lateinit var prefs: Prefs
     private lateinit var theme: SoruneTheme
@@ -150,6 +159,8 @@ class MainActivity : AppCompatActivity() {
             insets
         }
 
+        wallpaper.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> fitWallpaper() }
+        createTranslationChip()
         setupAddressBar()
         tabsButton.setOnClickListener { showTabSwitcher() }
         menuButton.setOnClickListener { showMenu() }
@@ -164,6 +175,7 @@ class MainActivity : AppCompatActivity() {
         applyTheme()
         restoreTabs(intent)
         scheduleUpdateCheck()
+        startTranslationLoops()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -266,6 +278,7 @@ class MainActivity : AppCompatActivity() {
         showAddress(tab)
         showProgress(tab)
         updateTabsButton()
+        updateTranslationChip()
     }
 
     private fun closeTab(tab: BrowserTab) {
@@ -316,6 +329,14 @@ class MainActivity : AppCompatActivity() {
         override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
             tab.url = url
             if (tab === active) showAddress(tab)
+        }
+
+        override fun onPageFinished(view: WebView, url: String) {
+            // The next page of a translated tab is translated too.
+            if (tab.translateTarget != null && isWebPage(url)) lifecycleScope.launch {
+                delay(500)
+                translatePage(tab, quiet = true)
+            }
         }
     }
 
@@ -595,8 +616,12 @@ class MainActivity : AppCompatActivity() {
         menu.add(0, 3, 2, "İleri").isEnabled = tab?.webView?.canGoForward() == true
         menu.add(0, 4, 3, "Paylaş").isEnabled = tab != null && tab.url.startsWith("http")
         menu.add(0, 5, 4, "Masaüstü sitesi").apply { isCheckable = true; isChecked = tab?.desktopMode == true }
-        menu.add(0, 6, 5, "Ayarlar ve temalar")
-        menu.add(0, 7, 6, "Güncellemeleri denetle")
+        val web = tab != null && isWebPage(tab.url)
+        menu.add(0, 8, 5, if (tab?.translateTarget != null) "Orijinali göster" else "Sayfayı Türkçeye çevir").isEnabled = web
+        menu.add(0, 9, 6, "Ekranı çevir (resimler dahil)").isEnabled = web
+        menu.add(0, 10, 7, "Otomatik ekran çevirisi").apply { isCheckable = true; isChecked = prefs.autoScreenTranslate }
+        menu.add(0, 6, 8, "Ayarlar ve temalar")
+        menu.add(0, 7, 9, "Güncellemeleri denetle")
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> openTab(NEW_TAB)
@@ -606,6 +631,13 @@ class MainActivity : AppCompatActivity() {
                 5 -> tab?.let { toggleDesktop(it) }
                 6 -> openSettings()
                 7 -> checkForUpdates(manual = true)
+                8 -> tab?.let { if (it.translateTarget != null) showOriginal(it) else lifecycleScope.launch { translatePage(it, quiet = false) } }
+                9 -> tab?.let { lifecycleScope.launch { translateScreen(it, quiet = false) } }
+                10 -> {
+                    prefs.autoScreenTranslate = !prefs.autoScreenTranslate
+                    toast(if (prefs.autoScreenTranslate) "Otomatik ekran çevirisi açık: her ${prefs.autoScreenSeconds} saniyede bakar" else "Otomatik ekran çevirisi kapalı")
+                    broadcast(settingsState())
+                }
             }
             true
         }
@@ -655,6 +687,14 @@ class MainActivity : AppCompatActivity() {
                 broadcast(settingsState())
             }
             "checkUpdate" -> checkForUpdates(manual = true)
+            "setAutoScreen" -> {
+                prefs.autoScreenTranslate = message.optBoolean("value", false)
+                broadcast(settingsState())
+            }
+            "setAutoSeconds" -> {
+                prefs.autoScreenSeconds = message.optInt("value", 10)
+                broadcast(settingsState())
+            }
         }
     }
 
@@ -666,7 +706,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun config(): JSONObject = JSONObject()
         .put("type", "config")
-        .put("theme", JSONObject(theme.hex).put("id", theme.id).put("name", theme.name).put("wallpaper", Themes.wallpaperUrl(theme)))
+        .put("theme", JSONObject(theme.hex).put("id", theme.id).put("name", theme.name).put("wallpaper", Themes.wallpaperUrl(theme))
+            .put("focusX", theme.focusX.toDouble()))
         .put("engine", SearchEngines.find(prefs.searchEngine).name)
         .put("version", BuildConfig.VERSION_NAME)
 
@@ -680,7 +721,123 @@ class MainActivity : AppCompatActivity() {
         .put("engine", prefs.searchEngine)
         .put("engines", JSONArray(SearchEngines.all.map { JSONObject().put("id", it.id).put("name", it.name) }))
         .put("suggest", prefs.searchSuggestions)
+        .put("autoScreen", prefs.autoScreenTranslate)
+        .put("autoSeconds", prefs.autoScreenSeconds)
         .put("version", BuildConfig.VERSION_NAME)
+
+    // ---------------------------------------------------------------- translation
+
+    private fun isWebPage(url: String?) = url != null && url.startsWith("http") && !url.startsWith(Themes.ASSET_ORIGIN)
+
+    /** Translates the page in place (Google Translate); quiet runs only report real problems. */
+    private suspend fun translatePage(tab: BrowserTab, quiet: Boolean) {
+        if (!isWebPage(tab.url) || tab.translating) return
+        val first = tab.translateTarget == null
+        tab.translateTarget = "tr"
+        tab.translating = true
+        updateTranslationChip()
+        try {
+            val result = PageTranslator.translateNewText(tab.webView, "tr")
+            result.sourceLanguage?.let { tab.translatedFrom = it }
+            if (first && PageTranslator.sameLanguage(result.sourceLanguage, "tr")) {
+                showOriginal(tab)
+                toast("Bu sayfa zaten Türkçe")
+            } else if (first && result.translated == 0) {
+                showOriginal(tab)
+                toast("Bu sayfada çevrilecek yazı bulamadım")
+            }
+        } catch (e: Exception) {
+            if (first) showOriginal(tab)
+            if (!quiet || first) toast("Google Çeviri'ye ulaşılamadı, sonra tekrar dene")
+        } finally {
+            tab.translating = false
+            updateTranslationChip()
+        }
+    }
+
+    private fun showOriginal(tab: BrowserTab) {
+        tab.translateTarget = null
+        tab.translatedFrom = null
+        tab.webView.evaluateJavascript(PageTranslator.RESTORE, null)
+        updateTranslationChip()
+    }
+
+    /** Screen translation, text in pictures too (Google Translate's image mode). */
+    private suspend fun translateScreen(tab: BrowserTab, quiet: Boolean) {
+        if (!isWebPage(tab.url) || screenTranslating) return
+        screenTranslating = true
+        if (!quiet) toast("Ekranı çeviriyorum…")
+        try {
+            val note = ScreenTranslator.translateVisible(this, tab.webView, "tr")
+            when {
+                note == null -> if (!quiet) toast("Çevirdim! Aşağı kaydırınca yine çevir.")
+                // "No text here" is normal while reading automatically (a picture without words).
+                !quiet || note != "Bu ekranda çevrilecek yazı bulamadım." -> toast(note)
+            }
+        } catch (e: Exception) {
+            if (!quiet) toast("Ekranı çeviremedim")
+        } finally {
+            screenTranslating = false
+        }
+    }
+
+    /**
+     * Two loops while Sorune is open: text a translated page adds later is translated too, and
+     * automatic screen translation looks every few seconds; when the page stands still on a screen
+     * it hasn't translated yet (scrolled, new chapter, pictures loaded), that screen is translated.
+     */
+    private fun startTranslationLoops() {
+        lifecycleScope.launch {
+            while (true) {
+                delay(2500)
+                val tab = active ?: continue
+                if (tab.translateTarget != null && !tab.translating && tab.progress >= 100 && !isFinishing)
+                    runCatching { translatePage(tab, quiet = true) }
+            }
+        }
+        lifecycleScope.launch {
+            while (true) {
+                delay(prefs.autoScreenSeconds * 1000L)
+                val tab = active ?: continue
+                if (!prefs.autoScreenTranslate || screenTranslating || !isWebPage(tab.url) || tab.progress < 100
+                    || customView != null || tabSwitcher.visibility == View.VISIBLE || !hasWindowFocus()) continue
+                val before = tab.webView.eval(ScreenTranslator.VIEW)
+                delay(600)
+                if (active !== tab) continue
+                val after = tab.webView.eval(ScreenTranslator.VIEW)
+                if (before != after || tab.autoView == after) continue
+                tab.autoView = after
+                translateScreen(tab, quiet = true)
+            }
+        }
+    }
+
+    private fun createTranslationChip() {
+        translationChip = TextView(this).apply {
+            textSize = 13f
+            setPadding(dp(14), dp(7), dp(14), dp(7))
+            elevation = dp(6).toFloat()
+            visibility = View.GONE
+            setOnClickListener { active?.let { showOriginal(it) } }
+        }
+        content.addView(translationChip, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(8) })
+    }
+
+    /** "İngilizce → Türkçe  ✕" over a translated page; a tap shows the original. */
+    private fun updateTranslationChip() {
+        if (!::translationChip.isInitialized) return
+        val tab = active
+        if (tab?.translateTarget == null) {
+            translationChip.visibility = View.GONE
+            return
+        }
+        translationChip.text = "🌐 ${PageTranslator.languageName(tab.translatedFrom)} → Türkçe" + (if (tab.translating) " …" else "") + "   ✕"
+        translationChip.setTextColor(theme.textPrimary)
+        translationChip.background = roundRect(ColorUtils.setAlphaComponent(theme.surface, 235), dp(18).toFloat(), theme.accent, dp(1))
+        translationChip.visibility = View.VISIBLE
+        translationChip.bringToFront()
+    }
 
     // ---------------------------------------------------------------- theme
 
@@ -695,6 +852,7 @@ class MainActivity : AppCompatActivity() {
                 assets.open("themes/$file").use { wallpaper.setImageBitmap(BitmapFactory.decodeStream(it, null, options)) }
             }
         }
+        fitWallpaper()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
             wallpaper.setRenderEffect(RenderEffect.createBlurEffect(36f, 36f, Shader.TileMode.CLAMP))
 
@@ -716,6 +874,14 @@ class MainActivity : AppCompatActivity() {
         tabs.forEach { it.webView.setBackgroundColor(theme.base) }
         broadcast(config())
         broadcast(settingsState())
+    }
+
+    /** The character in the wallpaper stays on screen, whatever the phone's shape or rotation. */
+    private fun fitWallpaper() {
+        val image = wallpaper.drawable ?: return
+        if (wallpaper.width == 0 || image.intrinsicWidth <= 0) return
+        wallpaper.scaleType = ImageView.ScaleType.MATRIX
+        wallpaper.imageMatrix = Themes.focusMatrix(image.intrinsicWidth, image.intrinsicHeight, wallpaper.width, wallpaper.height, theme.focusX)
     }
 
     private fun styleAddress(focused: Boolean) {

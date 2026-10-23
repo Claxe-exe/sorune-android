@@ -88,3 +88,7 @@
     font-weight: 700;
     font-size: 14px;
 }
+
+.slider-row { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.slider-row .label { flex: none; width: 128px; font-size: 13px; color: var(--text-dim); }
+.slider-row input { flex: 1; accent-color: var(--accent); }
