@@ -974,6 +974,7 @@ class MainActivity : AppCompatActivity() {
             "hour12", "greeting", "bookmarks", "weather", "note", "todo" -> (value as? Boolean)?.let { options.put(key, it) } ?: return
             "dim" -> (value as? Number)?.let { options.put(key, it.toInt().coerceIn(0, 80)) } ?: return
             "blur" -> (value as? Number)?.let { options.put(key, it.toInt().coerceIn(0, 20)) } ?: return
+            "glass" -> (value as? Number)?.let { options.put(key, it.toInt().coerceIn(0, 90)) } ?: return
             else -> return
         }
         prefs.newTab = options.toString()

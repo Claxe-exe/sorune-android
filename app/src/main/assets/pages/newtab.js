@@ -47,6 +47,7 @@ function applyOptions() {
     root.setProperty("--label-font", FONTS[options.labelFont] || FONTS.system);
     root.setProperty("--wall-blur", `${Math.min(20, Math.max(0, Number(options.blur) || 0))}px`);
     root.setProperty("--wall-dim", String(Math.min(0.8, Math.max(0, (Number(options.dim) || 0) / 100))));
+    showGlass(options.glass ?? 35);
     // The pixel font is wide: a smaller clock keeps it on one line.
     $("clock").classList.toggle("small", options.clockFont === "pixel");
     tick();
@@ -156,6 +157,16 @@ $("edit").addEventListener("click", () => {
     $("add-form").hidden = true;
     renderShortcuts();
 });
+
+// How dark the shortcut and widget cards are, 0 = only the wallpaper shows.
+function showGlass(value) {
+    const v = Math.min(90, Math.max(0, Number(value) || 0));
+    document.documentElement.style.setProperty("--card", `${v}%`);
+    $("glass").value = v;
+    $("glass-value").textContent = `%${v}`;
+}
+$("glass").addEventListener("input", (e) => showGlass(e.target.value));
+$("glass").addEventListener("change", (e) => send({ type: "newtab:set", key: "glass", value: Number(e.target.value) }));
 
 $("add-cancel").addEventListener("click", () => { $("add-form").hidden = true; });
 

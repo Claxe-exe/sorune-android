@@ -3,6 +3,7 @@
     --label-font: system-ui, sans-serif;
     --wall-blur: 0px;
     --wall-dim: 0;
+    --card: 35%;
 }
 
 .wall { filter: blur(var(--wall-blur)); transform: scale(1.04); }
@@ -89,7 +90,7 @@
     display: grid;
     place-items: center;
     border-radius: 18px;
-    background: color-mix(in srgb, var(--surface) 70%, transparent);
+    background: color-mix(in srgb, var(--surface) var(--card), transparent);
     border: 1px solid var(--border);
     backdrop-filter: blur(12px);
     font-size: 22px;
@@ -115,7 +116,10 @@
 .tools .remove { color: #ff8a8a; }
 @keyframes wiggle { from { transform: rotate(-2deg); } to { transform: rotate(2deg); } }
 
-.edit-row { display: flex; justify-content: center; margin-top: 18px; }
+.edit-row { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-top: 18px; }
+.glass-row { display: none; width: 100%; max-width: 320px; gap: 6px; font-size: 12px; color: var(--text-dim); text-align: center; }
+.editing .glass-row { display: grid; }
+.glass-row input { width: 100%; accent-color: var(--accent); }
 .edit-toggle {
     padding: 6px 14px;
     border-radius: 999px;
@@ -159,8 +163,8 @@
     padding: 14px;
     border-radius: 18px;
     border: 1px solid var(--border);
-    background: color-mix(in srgb, var(--surface) 72%, transparent);
-    backdrop-filter: blur(14px);
+    background: color-mix(in srgb, var(--surface) var(--card), transparent);
+    backdrop-filter: blur(6px);
 }
 .widget h3 { margin: 0 0 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
 .weather-now { display: flex; align-items: center; gap: 12px; }
