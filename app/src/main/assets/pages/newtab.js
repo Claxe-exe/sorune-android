@@ -20,9 +20,26 @@ function tick() {
     $("date").textContent = now.toLocaleDateString("tr-TR", { day: "numeric", month: "long", weekday: "long" });
 }
 
+// Bookmarks come first, the defaults fill up the row of eight.
+let bookmarks = [];
+onAppMessage((message) => {
+    if (message.type === "config") {
+        bookmarks = message.bookmarks || [];
+        renderShortcuts();
+    }
+});
+
 function renderShortcuts() {
     const nav = $("shortcuts");
-    nav.replaceChildren(...SHORTCUTS.map((s) => {
+    const seen = new Set();
+    const list = [...bookmarks, ...SHORTCUTS].filter((s) => {
+        let host;
+        try { host = new URL(s.url).href; } catch { return false; }
+        if (seen.has(host)) return false;
+        seen.add(host);
+        return true;
+    }).slice(0, 8);
+    nav.replaceChildren(...list.map((s) => {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "shortcut";

@@ -69,6 +69,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         val NEW_TAB = "${Themes.ASSET_ORIGIN}/pages/newtab.html"
         val SETTINGS = "${Themes.ASSET_ORIGIN}/pages/settings.html"
+        val LIBRARY = "${Themes.ASSET_ORIGIN}/pages/library.html"
         private const val DESKTOP_UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
         private const val UPDATE_INTERVAL_MS = 3 * 60 * 60 * 1000L
@@ -98,6 +99,7 @@ class MainActivity : AppCompatActivity() {
     private var autoPausedUntil = 0L
 
     private lateinit var prefs: Prefs
+    private lateinit var library: Library
     private lateinit var theme: SoruneTheme
     private lateinit var assetLoader: WebViewAssetLoader
 
@@ -136,6 +138,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         prefs = Prefs(this)
+        library = Library(File(filesDir, "library"))
         // Sorune's own pages and the theme pictures are served from the app's assets.
         assetLoader = WebViewAssetLoader.Builder().addPathHandler("/", WebViewAssetLoader.AssetsPathHandler(this)).build()
 
@@ -178,6 +181,13 @@ class MainActivity : AppCompatActivity() {
         restoreTabs(intent)
         scheduleUpdateCheck()
         startTranslationLoops()
+        // History is written every half minute while browsing (and when Sorune goes to the background).
+        lifecycleScope.launch {
+            while (true) {
+                delay(30_000)
+                saveLibrary()
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -200,6 +210,7 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         prefs.saveSession(tabs.map { it.url }.filter { it.isNotEmpty() }, tabs.indexOf(active).coerceAtLeast(0))
+        saveLibrary()
         CookieManager.getInstance().flush()
         active?.webView?.onPause()
     }
@@ -331,6 +342,7 @@ class MainActivity : AppCompatActivity() {
         override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
             tab.url = url
             if (tab === active) showAddress(tab)
+            if (!isReload && isWebPage(url)) library.visit(url, tab.title)
         }
 
         override fun onPageFinished(view: WebView, url: String) {
@@ -350,6 +362,7 @@ class MainActivity : AppCompatActivity() {
 
         override fun onReceivedTitle(view: WebView, title: String?) {
             tab.title = title.orEmpty()
+            if (isWebPage(tab.url)) library.titleFor(tab.url, tab.title)
         }
 
         override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message): Boolean {
@@ -429,7 +442,8 @@ class MainActivity : AppCompatActivity() {
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
         CookieManager.getInstance().getCookie(url)?.let { request.addRequestHeader("Cookie", it) }
-        (getSystemService(DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
+        val id = (getSystemService(DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
+        library.addDownload(DownloadRecord(id, name, url, System.currentTimeMillis()))
         toast("İndiriliyor: $name")
     }
 
@@ -466,6 +480,7 @@ class MainActivity : AppCompatActivity() {
     private fun displayAddress(url: String): String = when {
         isNewTab(url) -> ""
         url.startsWith(SETTINGS) -> "sorune://ayarlar"
+        url.startsWith(LIBRARY) -> "sorune://kitaplik"
         else -> url
     }
 
@@ -501,32 +516,43 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val engine = SearchEngines.find(prefs.searchEngine)
-        val first = if (AddressResolver.isAddress(query)) query to "Siteye git" else query to "${engine.name} ile ara"
-        renderSuggestions(listOf(first))
+        val first = if (AddressResolver.isAddress(query)) Suggestion(query, "Siteye git", query, "🌐")
+            else Suggestion(query, "${engine.name} ile ara", query, "🔍")
+        // Bookmarks (★) and history (🕘) that match, right under the first row.
+        val local = library.suggest(query).map { (url, title) ->
+            Suggestion(title.ifBlank { url }, url.removePrefix("https://").removePrefix("www."), url, if (library.isBookmarked(url)) "★" else "🕘")
+        }
+        renderSuggestions(listOf(first) + local)
         if (!prefs.searchSuggestions) return
         suggestJob = lifecycleScope.launch {
             delay(150)
             val remote = Net.suggestions(engine, query)
             if (address.hasFocus() && address.text.toString().trim() == query)
-                renderSuggestions(listOf(first) + remote.map { it to "" })
+                renderSuggestions(listOf(first) + local + remote.map { Suggestion(it, "", it, "🔍") })
         }
     }
 
-    private fun renderSuggestions(items: List<Pair<String, String>>) {
+    /** A row of the address bar's list: what it shows, a hint on the right, what opening it does. */
+    private data class Suggestion(val label: String, val hint: String, val target: String, val icon: String)
+
+    private fun renderSuggestions(items: List<Suggestion>) {
         suggestions.removeAllViews()
-        for ((text, hint) in items) {
+        for (item in items) {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(18), dp(12), dp(18), dp(12))
                 background = rippleBackground()
-                setOnClickListener { navigate(text) }
+                setOnClickListener { navigate(item.target) }
             }
             row.addView(TextView(this).apply {
-                this.text = if (AddressResolver.isAddress(text)) "🌐" else "🔍"
+                this.text = item.icon
                 textSize = 14f
+                setTextColor(theme.accent)
                 setPadding(0, 0, dp(14), 0)
             })
+            val text = item.label
+            val hint = item.hint.take(40)
             row.addView(TextView(this).apply {
                 this.text = text
                 textSize = 15f
@@ -617,6 +643,11 @@ class MainActivity : AppCompatActivity() {
         menu.add(0, 2, 1, "Yenile")
         menu.add(0, 3, 2, "İleri").isEnabled = tab?.webView?.canGoForward() == true
         menu.add(0, 4, 3, "Paylaş").isEnabled = tab != null && tab.url.startsWith("http")
+        val bookmarked = tab != null && library.isBookmarked(tab.url)
+        menu.add(0, 11, 3, if (bookmarked) "Yer iminden kaldır" else "Yer imlerine ekle").isEnabled = tab != null && isWebPage(tab.url)
+        menu.add(0, 12, 10, "Geçmiş")
+        menu.add(0, 13, 11, "Yer imleri")
+        menu.add(0, 14, 12, "İndirmeler")
         menu.add(0, 5, 4, "Masaüstü sitesi").apply { isCheckable = true; isChecked = tab?.desktopMode == true }
         val web = tab != null && isWebPage(tab.url)
         menu.add(0, 8, 5, if (tab?.translateTarget != null) "Orijinali göster" else "Sayfayı Türkçeye çevir").isEnabled = web
@@ -630,6 +661,14 @@ class MainActivity : AppCompatActivity() {
                 2 -> tab?.webView?.reload()
                 3 -> tab?.webView?.goForward()
                 4 -> tab?.let { share(it) }
+                11 -> tab?.let {
+                    val added = library.toggleBookmark(it.url, it.title)
+                    toast(if (added) "Yer imlerine eklendi" else "Yer iminden kaldırıldı")
+                    saveLibrary()
+                }
+                12 -> openLibrary("gecmis")
+                13 -> openLibrary("yer-imleri")
+                14 -> openLibrary("indirmeler")
                 5 -> tab?.let { toggleDesktop(it) }
                 6 -> openSettings()
                 7 -> checkForUpdates(manual = true)
@@ -661,6 +700,74 @@ class MainActivity : AppCompatActivity() {
         tab.webView.reload()
     }
 
+    /** One library tab: reused (and switched to the asked list) when it is already open. */
+    private fun openLibrary(section: String) {
+        val url = "$LIBRARY#$section"
+        tabs.firstOrNull { it.url.startsWith(LIBRARY) }?.let {
+            activate(it)
+            it.webView.loadUrl(url)
+            return
+        }
+        openTab(url)
+    }
+
+    private val libraryWriter = Any()
+
+    private fun saveLibrary() {
+        if (!library.dirty) return
+        val write = library.snapshot()
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { synchronized(libraryWriter) { write() } } }
+    }
+
+    /** The asked list for the library page (downloads with their live state from Android). */
+    private fun libraryState(view: String, query: String): JSONObject {
+        val items = JSONArray()
+        when (view) {
+            "gecmis" -> library.searchHistory(query).forEach {
+                items.put(JSONObject().put("url", it.url).put("title", it.title).put("time", it.time))
+            }
+            "yer-imleri" -> library.bookmarks.forEach {
+                items.put(JSONObject().put("url", it.url).put("title", it.title).put("time", it.time))
+            }
+            else -> {
+                val manager = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+                val states = mutableMapOf<Long, JSONObject>()
+                if (library.downloads.isNotEmpty()) {
+                    manager.query(DownloadManager.Query().setFilterById(*library.downloads.map { it.id }.toLongArray()))?.use { c ->
+                        while (c.moveToNext()) {
+                            val id = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_ID))
+                            val status = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                            states[id] = JSONObject()
+                                .put("state", when (status) {
+                                    DownloadManager.STATUS_SUCCESSFUL -> "done"
+                                    DownloadManager.STATUS_FAILED -> "failed"
+                                    else -> "running"
+                                })
+                                .put("done", c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)))
+                                .put("total", c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)))
+                        }
+                    }
+                }
+                library.downloads.forEach { record ->
+                    val state = states[record.id] ?: JSONObject().put("state", "missing")
+                    items.put(state.put("id", record.id).put("name", record.name).put("url", record.url).put("time", record.time))
+                }
+            }
+        }
+        return JSONObject().put("type", "library").put("view", view).put("items", items)
+    }
+
+    private fun openDownload(id: Long) {
+        val manager = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+        val uri = manager.getUriForDownloadedFile(id) ?: run { toast("Dosya bulunamadı"); return }
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, manager.getMimeTypeForDownloadedFile(id))
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: ActivityNotFoundException) {
+            toast("Bu dosyayı açacak uygulama yok")
+        }
+    }
+
     private fun openSettings() {
         tabs.firstOrNull { it.url.startsWith(SETTINGS) }?.let { activate(it); return }
         openTab(SETTINGS)
@@ -689,6 +796,34 @@ class MainActivity : AppCompatActivity() {
                 broadcast(settingsState())
             }
             "checkUpdate" -> checkForUpdates(manual = true)
+            "library:get" -> post(tab, libraryState(message.optString("view"), message.optString("query")))
+            "open" -> message.optString("url").takeIf { it.startsWith("http") }?.let { tab.webView.loadUrl(it) }
+            "history:remove" -> {
+                library.removeVisit(message.optString("url"), message.optLong("time"))
+                saveLibrary()
+                post(tab, JSONObject().put("type", "library:changed"))
+            }
+            "history:clear" -> {
+                library.clearHistory()
+                saveLibrary()
+                post(tab, JSONObject().put("type", "library:changed"))
+            }
+            "bookmark:remove" -> {
+                library.removeBookmark(message.optString("url"))
+                saveLibrary()
+                post(tab, JSONObject().put("type", "library:changed"))
+            }
+            "download:open" -> openDownload(message.optLong("id"))
+            "download:remove" -> {
+                library.removeDownload(message.optLong("id"))
+                saveLibrary()
+                post(tab, JSONObject().put("type", "library:changed"))
+            }
+            "download:folder" -> try {
+                startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            } catch (e: ActivityNotFoundException) {
+                toast("İndirilenler açılamadı")
+            }
             "setAutoScreen" -> {
                 prefs.autoScreenTranslate = message.optBoolean("value", false)
                 broadcast(settingsState())
@@ -711,6 +846,7 @@ class MainActivity : AppCompatActivity() {
         .put("theme", JSONObject(theme.hex).put("id", theme.id).put("name", theme.name).put("wallpaper", Themes.wallpaperUrl(theme))
             .put("focusX", theme.focusX.toDouble()))
         .put("engine", SearchEngines.find(prefs.searchEngine).name)
+        .put("bookmarks", JSONArray(library.bookmarks.take(8).map { JSONObject().put("name", it.title.ifBlank { it.url }).put("url", it.url) }))
         .put("version", BuildConfig.VERSION_NAME)
 
     private fun settingsState(): JSONObject = JSONObject()

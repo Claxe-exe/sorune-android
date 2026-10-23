@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="tr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'none'; img-src https: data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'">
+    <title>Kitaplık</title>
+    <link rel="stylesheet" href="common.css">
+    <link rel="stylesheet" href="library.css">
+</head>
+<body>
+    <div class="wall" id="wall"></div>
+    <div class="shade"></div>
+
+    <main class="page">
+        <header class="hero">
+            <p class="eyebrow">Sorune</p>
+            <h1>Kitaplık</h1>
+        </header>
+
+        <nav class="tabs" id="tabs" role="tablist" aria-label="Kitaplık">
+            <button type="button" role="tab" data-view="gecmis">Geçmiş</button>
+            <button type="button" role="tab" data-view="yer-imleri">Yer imleri</button>
+            <button type="button" role="tab" data-view="indirmeler">İndirmeler</button>
+        </nav>
+
+        <div class="tools" id="tools">
+            <input type="search" id="search" placeholder="Geçmişte ara" aria-label="Geçmişte ara">
+            <button type="button" class="chip danger" id="clear">Geçmişi temizle</button>
+            <button type="button" class="chip" id="folder" hidden>İndirilenler klasörü</button>
+        </div>
+
+        <ul class="list" id="list"></ul>
+        <p class="empty" id="empty" hidden></p>
+    </main>
+
+    <script src="bridge.js"></script>
+    <script src="library.js"></script>
+</body>
+</html>
