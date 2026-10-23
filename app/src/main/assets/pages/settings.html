@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="tr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'none'; img-src https: data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'">
+    <title>Ayarlar</title>
+    <link rel="stylesheet" href="common.css">
+    <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+    <div class="wall" id="wall"></div>
+    <div class="shade"></div>
+
+    <main class="page">
+        <header class="hero">
+            <p class="eyebrow">Sorune <span id="version"></span></p>
+            <h1>Ayarlar</h1>
+        </header>
+
+        <section class="card">
+            <h2>Tema</h2>
+            <p class="hint">Duvar kâğıdı, renkler ve yeni sekme birlikte değişir.</p>
+            <div class="themes" id="themes"></div>
+        </section>
+
+        <section class="card">
+            <h2>Arama</h2>
+            <div class="segmented" id="engines" role="radiogroup" aria-label="Arama motoru"></div>
+            <div class="row">
+                <div>
+                    <span class="label">Arama önerileri</span>
+                    <span class="hint">Yazarken arama motorunun önerileri çıkar; bunun için yazdıkların arama motoruna gönderilir.</span>
+                </div>
+                <button type="button" class="switch" id="suggest" role="switch" aria-label="Arama önerileri"></button>
+            </div>
+        </section>
+
+        <section class="card">
+            <h2>Güncellemeler</h2>
+            <p class="hint">Sorune yeni sürümü kendisi bulur ve indirir; kurmak için tek dokunuş yeter.</p>
+            <button type="button" class="btn" id="check">Güncellemeleri denetle</button>
+        </section>
+    </main>
+
+    <script src="bridge.js"></script>
+    <script src="settings.js"></script>
+</body>
+</html>

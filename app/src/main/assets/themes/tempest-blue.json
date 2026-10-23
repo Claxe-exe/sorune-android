@@ -1,0 +1,25 @@
+{
+  "id": "tempest-blue",
+  "name": "Tempest Blue",
+  "description": "Lacivert, buz mavisi ve turkuaz. Yüzen adalar ve fantastik bir gökyüzü.",
+  "wallpaper": "tempest-blue.jpg",
+  "colors": {
+    "base": "#070C18",
+    "chromeTint": "#0A1222",
+    "surface": "#12203A",
+    "surfaceHover": "#1A2B4A",
+    "surfacePressed": "#22365A",
+    "border": "#1E2F4D",
+    "textPrimary": "#EAF3FF",
+    "textSecondary": "#9DB2D3",
+    "accent": "#63D2FF",
+    "accentSecondary": "#8C9DFF",
+    "danger": "#E5484D",
+    "warning": "#F2B24C"
+  },
+  "chromeTintOpacity": 0.7,
+  "newTab": {
+    "overlay": "#070C18",
+    "particles": "bubbles"
+  }
+}

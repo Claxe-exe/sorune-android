@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Sorune</string>
+    <string name="address_hint">Ara veya adres yaz</string>
+    <string name="tabs">Sekmeler</string>
+    <string name="new_tab">Yeni sekme</string>
+    <string name="more">Diğer</string>
+    <string name="close_tab">Sekmeyi kapat</string>
+</resources>

@@ -1,0 +1,25 @@
+{
+  "id": "arima-kana",
+  "name": "Crimson Kana",
+  "description": "Kızıl ve siyah. Gün batımında şehrin üstünde bir çatı.",
+  "wallpaper": "arima-kana.jpg",
+  "colors": {
+    "base": "#0D080C",
+    "chromeTint": "#140A10",
+    "surface": "#22121A",
+    "surfaceHover": "#2E1823",
+    "surfacePressed": "#3A1F2C",
+    "border": "#341A26",
+    "textPrimary": "#F8ECEF",
+    "textSecondary": "#C29CA8",
+    "accent": "#FF4D6A",
+    "accentSecondary": "#FF8A5B",
+    "danger": "#FF6B6B",
+    "warning": "#F2B24C"
+  },
+  "chromeTintOpacity": 0.74,
+  "newTab": {
+    "overlay": "#0D080C",
+    "particles": "sparks"
+  }
+}

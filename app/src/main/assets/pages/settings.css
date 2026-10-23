@@ -1,0 +1,90 @@
+.page { position: relative; z-index: 1; padding: 26px 16px 48px; max-width: 720px; margin: 0 auto; }
+
+.hero { margin: 8px 4px 18px; }
+.eyebrow { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.28em; text-transform: uppercase; color: var(--accent); }
+.hero h1 { margin: 4px 0 0; font-size: 34px; font-weight: 300; }
+
+.card {
+    margin-bottom: 14px;
+    padding: 16px;
+    border-radius: 18px;
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface) 78%, transparent);
+    backdrop-filter: blur(16px);
+}
+.card h2 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+.hint { display: block; margin: 2px 0 12px; font-size: 13px; line-height: 1.45; color: var(--text-dim); }
+.label { display: block; font-size: 14px; font-weight: 500; }
+
+.themes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.theme {
+    position: relative;
+    aspect-ratio: 16 / 10;
+    border-radius: 14px;
+    border: 2px solid transparent;
+    background: var(--base) center / cover no-repeat;
+    overflow: hidden;
+    padding: 0;
+    color: #fff;
+}
+.theme.selected { border-color: var(--accent); box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 45%, transparent); }
+.theme .name {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    padding: 18px 10px 8px;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.75));
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.theme .dot { width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 8px currentColor; }
+
+.segmented { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 14px; }
+.segmented button {
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 13px;
+    font-weight: 600;
+}
+.segmented button[aria-checked="true"] { background: var(--accent); border-color: var(--accent); color: var(--base); }
+
+.row { display: flex; align-items: center; gap: 12px; }
+.row > div { flex: 1; }
+.row .hint { margin-bottom: 0; }
+
+.switch {
+    flex: none;
+    width: 46px;
+    height: 26px;
+    border-radius: 13px;
+    border: 1px solid var(--border);
+    background: var(--base);
+    position: relative;
+}
+.switch::after {
+    content: "";
+    position: absolute;
+    top: 3px; left: 3px;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    transition: transform 0.15s;
+}
+.switch[aria-checked="true"] { background: var(--accent); border-color: var(--accent); }
+.switch[aria-checked="true"]::after { transform: translateX(20px); background: var(--base); }
+
+.btn {
+    padding: 10px 18px;
+    border-radius: 999px;
+    border: 0;
+    background: var(--accent);
+    color: var(--base);
+    font-weight: 700;
+    font-size: 14px;
+}

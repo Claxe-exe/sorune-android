@@ -1,0 +1,25 @@
+{
+  "id": "fate-saber",
+  "name": "Fate Saber",
+  "description": "Kraliyet laciverti ve altın. Ay ışığında bir kale balkonu.",
+  "wallpaper": "fate-saber.jpg",
+  "colors": {
+    "base": "#080B17",
+    "chromeTint": "#0B1020",
+    "surface": "#151C33",
+    "surfaceHover": "#1D2542",
+    "surfacePressed": "#262F52",
+    "border": "#222B47",
+    "textPrimary": "#F3F0E6",
+    "textSecondary": "#AEB2C8",
+    "accent": "#E9C46A",
+    "accentSecondary": "#7C9BFF",
+    "danger": "#E5484D",
+    "warning": "#F2B24C"
+  },
+  "chromeTintOpacity": 0.72,
+  "newTab": {
+    "overlay": "#080B17",
+    "particles": "petals"
+  }
+}

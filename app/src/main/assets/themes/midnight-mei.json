@@ -1,0 +1,25 @@
+{
+  "id": "midnight-mei",
+  "name": "Midnight Mei",
+  "description": "Siyah, antrasit ve koyu mor. Gizemli, sakin, gotik bir gece.",
+  "wallpaper": "midnight-mei.jpg",
+  "colors": {
+    "base": "#0B0910",
+    "chromeTint": "#100C17",
+    "surface": "#1C1626",
+    "surfaceHover": "#261E33",
+    "surfacePressed": "#30263F",
+    "border": "#2A2236",
+    "textPrimary": "#EEE9F7",
+    "textSecondary": "#A59CBD",
+    "accent": "#B583FF",
+    "accentSecondary": "#DD7FD0",
+    "danger": "#E5484D",
+    "warning": "#F2B24C"
+  },
+  "chromeTintOpacity": 0.72,
+  "newTab": {
+    "overlay": "#0B0910",
+    "particles": "petals"
+  }
+}

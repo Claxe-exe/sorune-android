@@ -1,0 +1,76 @@
+.page {
+    position: relative;
+    z-index: 1;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 32px 22px 48px;
+}
+
+.greeting {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--accent);
+    text-shadow: 0 0 16px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+.clock {
+    margin: 6px 0 0;
+    font-size: clamp(64px, 22vw, 110px);
+    font-weight: 200;
+    letter-spacing: -0.03em;
+    line-height: 1;
+}
+
+.date { margin: 8px 0 26px; font-size: 16px; color: var(--text-dim); }
+
+.search input {
+    width: 100%;
+    height: 52px;
+    padding: 0 20px;
+    border-radius: 26px;
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    background: color-mix(in srgb, var(--surface) 72%, transparent);
+    color: var(--text);
+    font-size: 16px;
+    outline: none;
+    backdrop-filter: blur(16px);
+}
+.search input::placeholder { color: var(--text-dim); }
+.search input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+
+.shortcuts {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 18px 10px;
+    margin-top: 30px;
+}
+
+.shortcut {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 7px;
+    border: 0;
+    background: none;
+    color: var(--text);
+    font-size: 12px;
+    padding: 0;
+}
+.shortcut .icon {
+    width: 54px;
+    height: 54px;
+    display: grid;
+    place-items: center;
+    border-radius: 18px;
+    background: color-mix(in srgb, var(--surface) 70%, transparent);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(12px);
+}
+.shortcut .icon img { width: 28px; height: 28px; }
+.shortcut:active .icon { border-color: var(--accent); }
+.shortcut span { max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
