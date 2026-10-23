@@ -73,6 +73,12 @@ class MainActivity : AppCompatActivity() {
         val SETTINGS = "${Themes.ASSET_ORIGIN}/pages/settings.html"
         val LIBRARY = "${Themes.ASSET_ORIGIN}/pages/library.html"
         val READER = "${Themes.ASSET_ORIGIN}/pages/reader.html"
+        /** From the home screen widget and the app icon's shortcuts. */
+        const val ACTION_SEARCH = "com.claxe.sorune.SEARCH"
+        const val ACTION_PRIVATE = "com.claxe.sorune.PRIVATE"
+        const val ACTION_LIBRARY = "com.claxe.sorune.LIBRARY"
+        /** Languages pages and screens can be translated into. */
+        val TRANSLATE_LANGUAGES = listOf("tr", "en", "ja", "ko", "zh-CN", "de", "fr", "es", "ru", "ar", "it", "pt")
         private val NEW_TAB_FONTS = setOf("system", "orbitron", "bebas", "pacifico", "pixel", "righteous", "script")
         private val NEW_TAB_EFFECTS = setOf("theme", "none", "petals", "snow", "sparks", "bubbles")
         private const val DESKTOP_UA =
@@ -92,6 +98,7 @@ class MainActivity : AppCompatActivity() {
         var url = ""
         var progress = 100
         var desktopMode = false
+        var favicon: android.graphics.Bitmap? = null
         /** Answers Sorune's own pages (new tab, settings) on the page's message channel. */
         var reply: JavaScriptReplyProxy? = null
         /** Page translation: on while set; stays on for the tab's next pages, like Chrome. */
@@ -251,7 +258,24 @@ class MainActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        linkFrom(intent)?.let { openTab(it) }
+        if (!handleAction(intent)) linkFrom(intent)?.let { openTab(it) }
+    }
+
+    /** Widget and app-icon shortcuts: search, private tab, library. */
+    private fun handleAction(intent: Intent?): Boolean {
+        when (intent?.action) {
+            ACTION_SEARCH -> {
+                if (active?.url?.let { isNewTab(it) } != true) openTab(NEW_TAB)
+                address.postDelayed({
+                    address.requestFocus()
+                    (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(address, 0)
+                }, 250)
+            }
+            ACTION_PRIVATE -> openTab(NEW_TAB, isPrivate = privateSupported)
+            ACTION_LIBRARY -> openLibrary("gecmis")
+            else -> return false
+        }
+        return true
     }
 
     private fun linkFrom(intent: Intent?): String? =
@@ -264,6 +288,7 @@ class MainActivity : AppCompatActivity() {
             activate(tabs[activeIndex.coerceIn(0, tabs.lastIndex)])
         val link = linkFrom(intent)
         if (link != null) openTab(link) else if (tabs.isEmpty()) openTab(NEW_TAB)
+        handleAction(intent)
     }
 
     override fun onPause() {
@@ -339,6 +364,7 @@ class MainActivity : AppCompatActivity() {
         content.addView(tab.webView, 0, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         if (url != null) {
             tab.url = url
+            applyUaFor(tab, url)
             tab.webView.loadUrl(url)
         }
         if (activate || active == null) activate(tab)
@@ -405,6 +431,12 @@ class MainActivity : AppCompatActivity() {
 
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             val scheme = request.url.scheme?.lowercase() ?: return false
+            // A site remembered as "desktop" (or no longer) opens with the matching browser identity.
+            if ((scheme == "http" || scheme == "https") && request.isForMainFrame && !request.isRedirect
+                && applyUaFor(tab, request.url.toString())) {
+                view.loadUrl(request.url.toString())
+                return true
+            }
             if (scheme in setOf("http", "https", "about", "data", "blob", "javascript")) return false
             openExternal(view, request.url.toString())
             return true
@@ -437,6 +469,10 @@ class MainActivity : AppCompatActivity() {
         override fun onProgressChanged(view: WebView, newProgress: Int) {
             tab.progress = newProgress
             if (tab === active) showProgress(tab)
+        }
+
+        override fun onReceivedIcon(view: WebView, icon: android.graphics.Bitmap?) {
+            tab.favicon = icon
         }
 
         override fun onReceivedTitle(view: WebView, title: String?) {
@@ -583,6 +619,7 @@ class MainActivity : AppCompatActivity() {
         clearAddressFocus()
         val tab = active ?: openTab(null)
         tab.url = url
+        applyUaFor(tab, url)
         tab.webView.loadUrl(url)
         showAddress(tab)
     }
@@ -728,6 +765,7 @@ class MainActivity : AppCompatActivity() {
         if (privateSupported) menu.add(0, 15, 0, "Yeni gizli sekme")
         menu.add(0, 16, 4, "Sayfada bul").isEnabled = tab != null && isWebPage(tab.url)
         menu.add(0, 18, 4, "Okuma modu").isEnabled = tab != null && isWebPage(tab.url)
+        menu.add(0, 19, 4, "Ana ekrana ekle").isEnabled = tab != null && isWebPage(tab.url)
         menu.add(0, 17, 9, if (adBlockOn) "Reklam engelleyici: ${tab?.blocked?.get() ?: 0} engellendi" else "Reklam engelleyici kapalı").apply {
             isCheckable = true
             isChecked = adBlockOn
@@ -742,7 +780,7 @@ class MainActivity : AppCompatActivity() {
         menu.add(0, 14, 12, "İndirmeler")
         menu.add(0, 5, 4, "Masaüstü sitesi").apply { isCheckable = true; isChecked = tab?.desktopMode == true }
         val web = tab != null && isWebPage(tab.url)
-        menu.add(0, 8, 5, if (tab?.translateTarget != null) "Orijinali göster" else "Sayfayı Türkçeye çevir").isEnabled = web
+        menu.add(0, 8, 5, if (tab?.translateTarget != null) "Orijinali göster" else "Sayfayı çevir (${PageTranslator.languageName(prefs.translateLanguage)})").isEnabled = web
         menu.add(0, 9, 6, "Ekranı çevir (resimler dahil)").isEnabled = web
         menu.add(0, 10, 7, "Otomatik ekran çevirisi").apply { isCheckable = true; isChecked = prefs.autoScreenTranslate }
         menu.add(0, 6, 8, "Ayarlar ve temalar")
@@ -766,6 +804,7 @@ class MainActivity : AppCompatActivity() {
                 13 -> openLibrary("yer-imleri")
                 14 -> openLibrary("indirmeler")
                 5 -> tab?.let { toggleDesktop(it) }
+                19 -> tab?.let { addToHomeScreen(it) }
                 6 -> openSettings()
                 7 -> checkForUpdates(manual = true)
                 8 -> tab?.let { if (it.translateTarget != null) showOriginal(it) else lifecycleScope.launch { translatePage(it, quiet = false) } }
@@ -787,7 +826,7 @@ class MainActivity : AppCompatActivity() {
         when (key) {
             "clockFont", "labelFont" -> (value as? String)?.takeIf { it in NEW_TAB_FONTS }?.let { options.put(key, it) } ?: return
             "effect" -> (value as? String)?.takeIf { it in NEW_TAB_EFFECTS }?.let { options.put(key, it) } ?: return
-            "hour12", "greeting", "bookmarks" -> (value as? Boolean)?.let { options.put(key, it) } ?: return
+            "hour12", "greeting", "bookmarks", "weather", "note", "todo" -> (value as? Boolean)?.let { options.put(key, it) } ?: return
             "dim" -> (value as? Number)?.let { options.put(key, it.toInt().coerceIn(0, 80)) } ?: return
             "blur" -> (value as? Number)?.let { options.put(key, it.toInt().coerceIn(0, 20)) } ?: return
             else -> return
@@ -887,11 +926,40 @@ class MainActivity : AppCompatActivity() {
         }, "Paylaş"))
     }
 
+    private fun hostOf(url: String?): String? = runCatching { Uri.parse(url).host?.removePrefix("www.") }.getOrNull()
+
+    /** Desktop or phone browser identity for this address (remembered per site); true when it changed. */
+    private fun applyUaFor(tab: BrowserTab, url: String): Boolean {
+        val desktop = hostOf(url)?.let { it in prefs.desktopSites } == true
+        if (desktop == tab.desktopMode) return false
+        tab.desktopMode = desktop
+        tab.webView.settings.userAgentString = if (desktop) DESKTOP_UA else WebViewDefaults.userAgent(this)
+        return true
+    }
+
+    /** Desktop site on/off for this site, remembered for next time. */
     private fun toggleDesktop(tab: BrowserTab) {
-        tab.desktopMode = !tab.desktopMode
-        val defaultUa = WebViewDefaults.userAgent(this)
-        tab.webView.settings.userAgentString = if (tab.desktopMode) DESKTOP_UA else defaultUa
+        val host = hostOf(tab.url) ?: return
+        prefs.desktopSites = if (host in prefs.desktopSites) prefs.desktopSites - host else prefs.desktopSites + host
+        applyUaFor(tab, tab.url)
+        toast(if (tab.desktopMode) "$host masaüstü sitesi olarak açılacak" else "$host telefon sitesi olarak açılacak")
         tab.webView.reload()
+    }
+
+    /** The site as an icon on the home screen (opens in Sorune). */
+    private fun addToHomeScreen(tab: BrowserTab) {
+        if (!androidx.core.content.pm.ShortcutManagerCompat.isRequestPinShortcutSupported(this)) {
+            toast("Ana ekranın kısayol eklemeyi desteklemiyor")
+            return
+        }
+        val icon = tab.favicon?.let { androidx.core.graphics.drawable.IconCompat.createWithBitmap(it) }
+            ?: androidx.core.graphics.drawable.IconCompat.createWithResource(this, R.mipmap.ic_launcher)
+        val shortcut = androidx.core.content.pm.ShortcutInfoCompat.Builder(this, "site-" + tab.url.hashCode())
+            .setShortLabel(tab.title.ifBlank { hostOf(tab.url) ?: "Sorune" }.take(24))
+            .setIcon(icon)
+            .setIntent(Intent(Intent.ACTION_VIEW, Uri.parse(tab.url), this, MainActivity::class.java))
+            .build()
+        androidx.core.content.pm.ShortcutManagerCompat.requestPinShortcut(this, shortcut, null)
     }
 
     /** One library tab: reused (and switched to the asked list) when it is already open. */
@@ -1036,9 +1104,28 @@ class MainActivity : AppCompatActivity() {
                 prefs.newTab = JSONObject(prefs.newTab).put("shortcuts", items).toString()
                 broadcast(config())
             }
+            "newtab:widgets" -> {
+                // Only the known fields, size-limited: the new tab page writes these.
+                val data = message.optJSONObject("data") ?: JSONObject()
+                val todos = JSONArray()
+                val list = data.optJSONArray("todos") ?: JSONArray()
+                for (i in 0 until minOf(list.length(), 30)) {
+                    val item = list.optJSONObject(i) ?: continue
+                    todos.put(JSONObject().put("text", item.optString("text").take(120)).put("done", item.optBoolean("done")))
+                }
+                val clean = JSONObject()
+                    .put("city", data.optString("city").take(60))
+                    .put("note", data.optString("note").take(2000))
+                    .put("todos", todos)
+                prefs.newTab = JSONObject(prefs.newTab).put("widgets", clean).toString()
+            }
             "newtab:resetShortcuts" -> {
                 prefs.newTab = JSONObject(prefs.newTab).apply { remove("shortcuts") }.toString()
                 broadcast(config())
+                broadcast(settingsState())
+            }
+            "setTranslateLanguage" -> {
+                message.optString("value").takeIf { it in TRANSLATE_LANGUAGES }?.let { prefs.translateLanguage = it }
                 broadcast(settingsState())
             }
             "setSwipeTabs" -> {
@@ -1136,6 +1223,8 @@ class MainActivity : AppCompatActivity() {
         .put("pip", prefs.pictureInPicture)
         .put("newtab", runCatching { JSONObject(prefs.newTab) }.getOrDefault(JSONObject()))
         .put("swipeTabs", prefs.swipeTabs)
+        .put("translateLanguage", prefs.translateLanguage)
+        .put("languages", JSONArray(TRANSLATE_LANGUAGES.map { JSONObject().put("id", it).put("name", PageTranslator.languageName(it)) }))
         .put("pullRefresh", prefs.pullRefresh)
         .put("autoSeconds", prefs.autoScreenSeconds)
         .put("version", BuildConfig.VERSION_NAME)
@@ -1323,15 +1412,15 @@ class MainActivity : AppCompatActivity() {
     private suspend fun translatePage(tab: BrowserTab, quiet: Boolean) {
         if (!isWebPage(tab.url) || tab.translating) return
         val first = tab.translateTarget == null
-        tab.translateTarget = "tr"
+        tab.translateTarget = prefs.translateLanguage
         tab.translating = true
         updateTranslationChip()
         try {
-            val result = PageTranslator.translateNewText(tab.webView, "tr")
+            val result = PageTranslator.translateNewText(tab.webView, tab.translateTarget ?: prefs.translateLanguage)
             result.sourceLanguage?.let { tab.translatedFrom = it }
-            if (first && PageTranslator.sameLanguage(result.sourceLanguage, "tr")) {
+            if (first && PageTranslator.sameLanguage(result.sourceLanguage, tab.translateTarget)) {
                 showOriginal(tab)
-                toast("Bu sayfa zaten Türkçe")
+                toast("Bu sayfa zaten ${PageTranslator.languageName(prefs.translateLanguage)}")
             } else if (first && result.translated == 0) {
                 showOriginal(tab)
                 toast("Bu sayfada çevrilecek yazı bulamadım")
@@ -1358,7 +1447,7 @@ class MainActivity : AppCompatActivity() {
         screenTranslating = true
         if (!quiet) toast("Ekranı çeviriyorum…")
         try {
-            val outcome = ScreenTranslator.translateVisible(this, tab.webView, "tr")
+            val outcome = ScreenTranslator.translateVisible(this, tab.webView, prefs.translateLanguage)
             val note = outcome.note
             if (outcome.googleBusy) {
                 // Said once even while reading automatically; then automatic translation rests a minute.
@@ -1429,7 +1518,7 @@ class MainActivity : AppCompatActivity() {
             translationChip.visibility = View.GONE
             return
         }
-        translationChip.text = "🌐 ${PageTranslator.languageName(tab.translatedFrom)} → Türkçe" + (if (tab.translating) " …" else "") + "   ✕"
+        translationChip.text = "🌐 ${PageTranslator.languageName(tab.translatedFrom)} → ${PageTranslator.languageName(tab.translateTarget)}" + (if (tab.translating) " …" else "") + "   ✕"
         translationChip.setTextColor(theme.textPrimary)
         translationChip.background = roundRect(ColorUtils.setAlphaComponent(theme.surface, 235), dp(18).toFloat(), theme.accent, dp(1))
         translationChip.visibility = View.VISIBLE

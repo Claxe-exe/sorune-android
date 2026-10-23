@@ -69,6 +69,16 @@ class Prefs(context: Context) {
         get() = store.getBoolean("pullRefresh", false)
         set(value) = store.edit().putBoolean("pullRefresh", value).apply()
 
+    /** The language pages and screens are translated into. */
+    var translateLanguage: String
+        get() = store.getString("translateLanguage", "tr") ?: "tr"
+        set(value) = store.edit().putString("translateLanguage", value).apply()
+
+    /** Sites always opened as their desktop version (host names). */
+    var desktopSites: Set<String>
+        get() = store.getStringSet("desktopSites", emptySet()) ?: emptySet()
+        set(value) = store.edit().putStringSet("desktopSites", value.toSet()).apply()
+
     /** When updates were last looked for (ms); checked at most every few hours. */
     var lastUpdateCheck: Long
         get() = store.getLong("updateCheck", 0)

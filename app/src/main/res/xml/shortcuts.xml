@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press on the app icon -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutId="search"
+        android:shortcutShortLabel="@string/shortcut_search">
+        <intent
+            android:action="com.claxe.sorune.SEARCH"
+            android:targetClass="com.claxe.sorune.MainActivity"
+            android:targetPackage="com.claxe.sorune" />
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_private"
+        android:shortcutId="private"
+        android:shortcutShortLabel="@string/private_tab">
+        <intent
+            android:action="com.claxe.sorune.PRIVATE"
+            android:targetClass="com.claxe.sorune.MainActivity"
+            android:targetPackage="com.claxe.sorune" />
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutId="library"
+        android:shortcutShortLabel="@string/shortcut_library">
+        <intent
+            android:action="com.claxe.sorune.LIBRARY"
+            android:targetClass="com.claxe.sorune.MainActivity"
+            android:targetPackage="com.claxe.sorune" />
+    </shortcut>
+</shortcuts>

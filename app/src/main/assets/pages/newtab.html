@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta http-equiv="Content-Security-Policy"
-          content="default-src 'none'; img-src https: data:; style-src 'self'; font-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'">
+          content="default-src 'none'; img-src https: data:; style-src 'self'; font-src 'self'; script-src 'self'; connect-src https://geocoding-api.open-meteo.com https://api.open-meteo.com; base-uri 'none'; form-action 'none'">
     <title>Yeni sekme</title>
     <link rel="stylesheet" href="fonts.css">
     <link rel="stylesheet" href="common.css">
@@ -28,6 +28,8 @@
         <div class="edit-row">
             <button type="button" class="edit-toggle" id="edit" aria-label="Kısayolları düzenle">✎ Düzenle</button>
         </div>
+
+        <section class="widgets" id="widgets"></section>
 
         <form class="add-form" id="add-form" autocomplete="off" hidden>
             <input type="text" id="add-name" maxlength="24" placeholder="Ad, ör. Webtoon" aria-label="Kısayol adı">

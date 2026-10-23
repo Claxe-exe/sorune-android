@@ -112,6 +112,18 @@ function renderNewTab(state) {
     $("nt-greeting").onclick = () => setNewTab("greeting", nt.greeting === false);
     $("nt-bookmarks").setAttribute("aria-checked", String(nt.bookmarks !== false));
     $("nt-bookmarks").onclick = () => setNewTab("bookmarks", nt.bookmarks === false);
+    for (const [id, key] of [["w-weather", "weather"], ["w-todo", "todo"], ["w-note", "note"]]) {
+        $(id).setAttribute("aria-checked", String(Boolean(nt[key])));
+        $(id).onclick = () => setNewTab(key, !nt[key]);
+    }
+    $("translate-language").replaceChildren(...(state.languages || []).map((language) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = language.name;
+        button.setAttribute("aria-checked", String(language.id === state.translateLanguage));
+        button.addEventListener("click", () => send({ type: "setTranslateLanguage", value: language.id }));
+        return button;
+    }));
     $("swipe-tabs").setAttribute("aria-checked", String(Boolean(state.swipeTabs)));
     $("swipe-tabs").onclick = () => send({ type: "setSwipeTabs", value: !state.swipeTabs });
     $("pull-refresh").setAttribute("aria-checked", String(Boolean(state.pullRefresh)));

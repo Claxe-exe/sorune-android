@@ -262,6 +262,154 @@ document.addEventListener("visibilitychange", () => {
     else if (effect !== "none") frame = requestAnimationFrame(draw);
 });
 
+// ---------------------------------------------------------------- widgets
+
+const WEATHER = {
+    0: ["☀️", "Açık"], 1: ["🌤", "Az bulutlu"], 2: ["⛅", "Parçalı bulutlu"], 3: ["☁️", "Bulutlu"],
+    45: ["🌫", "Sisli"], 48: ["🌫", "Sisli"], 51: ["🌦", "Çiseliyor"], 53: ["🌦", "Çiseliyor"], 55: ["🌦", "Çiseliyor"],
+    61: ["🌧", "Yağmurlu"], 63: ["🌧", "Yağmurlu"], 65: ["🌧", "Sağanak"], 71: ["🌨", "Karlı"], 73: ["🌨", "Karlı"],
+    75: ["❄️", "Yoğun kar"], 80: ["🌦", "Sağanak"], 81: ["🌧", "Sağanak"], 82: ["⛈", "Şiddetli sağanak"], 95: ["⛈", "Fırtına"],
+};
+
+function widgetData() {
+    return options.widgets || {};
+}
+
+function saveWidgets(data) {
+    options.widgets = data;
+    send({ type: "newtab:widgets", data });
+}
+
+function card(title) {
+    const box = document.createElement("div");
+    box.className = "widget";
+    const h = document.createElement("h3");
+    h.textContent = title;
+    box.append(h);
+    return box;
+}
+
+async function weatherFor(city) {
+    // Cached for half an hour: the new tab opens often.
+    try {
+        const cached = JSON.parse(localStorage.getItem("weather") || "null");
+        if (cached && cached.city === city && Date.now() - cached.time < 30 * 60 * 1000) return cached;
+    } catch { /* storage off */ }
+    const geo = await (await fetch(`https://geocoding-api.open-meteo.com/v1/search?count=1&language=tr&name=${encodeURIComponent(city)}`)).json();
+    const place = geo.results && geo.results[0];
+    if (!place) throw new Error("Şehir bulunamadı");
+    const data = await (await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1`)).json();
+    const result = {
+        city, time: Date.now(), name: place.name,
+        temp: Math.round(data.current.temperature_2m), code: data.current.weather_code,
+        max: Math.round(data.daily.temperature_2m_max[0]), min: Math.round(data.daily.temperature_2m_min[0]),
+    };
+    try { localStorage.setItem("weather", JSON.stringify(result)); } catch { /* storage off */ }
+    return result;
+}
+
+function weatherWidget() {
+    const box = card("Hava durumu");
+    const data = widgetData();
+    const askCity = () => {
+        const input = document.createElement("input");
+        input.placeholder = "Şehir yaz, ör. İstanbul";
+        input.enterKeyHint = "done";
+        input.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" && input.value.trim()) saveWidgetsAndRender({ ...widgetData(), city: input.value.trim().slice(0, 60) });
+        });
+        box.append(input);
+    };
+    if (!data.city) {
+        askCity();
+        return box;
+    }
+    const now = document.createElement("div");
+    now.className = "weather-now";
+    now.textContent = "Yükleniyor…";
+    box.append(now);
+    weatherFor(data.city).then((w) => {
+        const [emoji, text] = WEATHER[w.code] || ["🌡", ""];
+        const e = document.createElement("span"); e.className = "emoji"; e.textContent = emoji;
+        const big = document.createElement("span"); big.className = "big"; big.textContent = `${w.temp}°`;
+        const info = document.createElement("span"); info.className = "info";
+        const line1 = document.createElement("span"); line1.textContent = `${w.name} · ${text}`;
+        const line2 = document.createElement("span"); line2.textContent = `En yüksek ${w.max}° · en düşük ${w.min}°`;
+        const change = document.createElement("button"); change.className = "city-link"; change.textContent = "Şehri değiştir";
+        change.addEventListener("click", () => saveWidgetsAndRender({ ...widgetData(), city: "" }));
+        info.append(line1, line2, change);
+        now.replaceChildren(e, big, info);
+    }).catch(() => {
+        now.textContent = "Hava durumu alınamadı.";
+        const change = document.createElement("button"); change.className = "city-link"; change.textContent = "Şehri değiştir";
+        change.addEventListener("click", () => saveWidgetsAndRender({ ...widgetData(), city: "" }));
+        now.append(" ", change);
+    });
+    return box;
+}
+
+function noteWidget() {
+    const box = card("Not");
+    const area = document.createElement("textarea");
+    area.placeholder = "Aklına geleni yaz…";
+    area.value = widgetData().note || "";
+    let timer = null;
+    area.addEventListener("input", () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => saveWidgets({ ...widgetData(), note: area.value.slice(0, 2000) }), 600);
+    });
+    box.append(area);
+    return box;
+}
+
+function todoWidget() {
+    const box = card("Yapılacaklar");
+    const todos = Array.isArray(widgetData().todos) ? widgetData().todos : [];
+    const list = document.createElement("ul");
+    list.className = "todo";
+    todos.forEach((item, index) => {
+        const li = document.createElement("li");
+        if (item.done) li.className = "done";
+        const check = document.createElement("input");
+        check.type = "checkbox";
+        check.checked = Boolean(item.done);
+        check.addEventListener("change", () => {
+            const copy = todos.map((t, i) => i === index ? { ...t, done: check.checked } : t);
+            saveWidgetsAndRender({ ...widgetData(), todos: copy });
+        });
+        const text = document.createElement("span");
+        text.textContent = item.text;
+        const remove = document.createElement("button");
+        remove.textContent = "✕";
+        remove.setAttribute("aria-label", "Sil");
+        remove.addEventListener("click", () => saveWidgetsAndRender({ ...widgetData(), todos: todos.filter((_, i) => i !== index) }));
+        li.append(check, text, remove);
+        list.append(li);
+    });
+    const input = document.createElement("input");
+    input.placeholder = "Yeni iş ekle…";
+    input.enterKeyHint = "done";
+    input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && input.value.trim() && todos.length < 30)
+            saveWidgetsAndRender({ ...widgetData(), todos: [...todos, { text: input.value.trim().slice(0, 120), done: false }] });
+    });
+    box.append(list, input);
+    return box;
+}
+
+function saveWidgetsAndRender(data) {
+    saveWidgets(data);
+    renderWidgets();
+}
+
+function renderWidgets() {
+    const parts = [];
+    if (options.weather) parts.push(weatherWidget());
+    if (options.todo) parts.push(todoWidget());
+    if (options.note) parts.push(noteWidget());
+    $("widgets").replaceChildren(...parts);
+}
+
 // ---------------------------------------------------------------- start
 
 $("search").addEventListener("submit", (event) => {
@@ -277,6 +425,8 @@ onAppMessage((message) => {
     themeEffect = (message.theme && message.theme.particles) || "none";
     applyOptions();
     renderShortcuts();
+    // Not while typing a note: the page would lose the cursor.
+    if (!document.activeElement || !document.activeElement.closest(".widget")) renderWidgets();
 });
 
 tick();

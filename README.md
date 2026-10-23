@@ -20,6 +20,9 @@
 - **Yeni sekmeyi kişiselleştir:** saat ve kısayollar için 7 yazı tipi, 24/12 saat, efektler (yaprak, kar, kıvılcım,
   baloncuk), karartma ve bulanıklık; kısayolları ekle, sil, sırala
 - **Okuma modu**, adres çubuğunda kaydırarak sekme değiştirme, aşağı çekip yenileme
+- **Ana ekran arama widget'ı**, uygulama simgesi kısayolları (ara, gizli sekme, kitaplık), siteyi ana ekrana ekleme
+- Yeni sekmede **hava durumu, not ve yapılacaklar** widget'ları; **çeviri dili** seçimi (12 dil);
+  **masaüstü sitesi** her site için hatırlanır
 - **Sayfa çevirisi** (Google Çeviri, yerinde) ve **ekran çevirisi**: resimlerdeki yazılar dahil, webtoon okumak için;
   istersen **otomatik**, 3–20 saniyede bir ekran değişince
 - **Kitaplık:** geçmiş (arama, silme), yer imleri, indirmeler (ilerleme, dokununca aç); yer imleri yeni sekmede kısayol,

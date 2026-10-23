@@ -6,4 +6,9 @@
     <string name="new_tab">Yeni sekme</string>
     <string name="more">Diğer</string>
     <string name="close_tab">Sekmeyi kapat</string>
+    <string name="widget_hint">Sorune\'de ara</string>
+    <string name="widget_description">Ana ekrandan Sorune ile ara</string>
+    <string name="private_tab">Gizli sekme</string>
+    <string name="shortcut_search">Ara</string>
+    <string name="shortcut_library">Kitaplık</string>
 </resources>

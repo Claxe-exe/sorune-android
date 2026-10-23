@@ -79,6 +79,19 @@
                 <div><span class="label">Yer imleri kısayollarda</span><span class="hint">Yer imlerin kısayolların başında görünür.</span></div>
                 <button type="button" class="switch" id="nt-bookmarks" role="switch" aria-label="Yer imleri kısayollarda"></button>
             </div>
+            <span class="label" style="margin-top: 12px">Widget'lar</span>
+            <div class="row" style="margin-top: 6px">
+                <div><span class="label">Hava durumu</span><span class="hint">Yazdığın şehrin havası (yalnızca şehir adı Open-Meteo'ya gider).</span></div>
+                <button type="button" class="switch" id="w-weather" role="switch" aria-label="Hava durumu"></button>
+            </div>
+            <div class="row" style="margin-top: 10px">
+                <div><span class="label">Yapılacaklar</span></div>
+                <button type="button" class="switch" id="w-todo" role="switch" aria-label="Yapılacaklar"></button>
+            </div>
+            <div class="row" style="margin-top: 10px">
+                <div><span class="label">Not</span></div>
+                <button type="button" class="switch" id="w-note" role="switch" aria-label="Not"></button>
+            </div>
             <p class="hint" style="margin-top: 12px">Kısayolları yeni sekmedeki <strong>✎ Düzenle</strong> ile ekleyip silebilir, sıralayabilirsin.</p>
             <button type="button" class="chip-button" id="nt-reset">Kısayolları varsayılana döndür</button>
         </section>
@@ -148,6 +161,8 @@
         <section class="card">
             <h2>Çeviri</h2>
             <p class="hint">Sayfa ve ekran çevirisi ⋮ menüsünde. Ekran çevirisi resimlerdeki yazıları da çevirir (ekranın görüntüsü Google Çeviri'ye gider).</p>
+            <span class="label">Hangi dile çevrilsin</span>
+            <div class="segmented" id="translate-language" role="radiogroup" aria-label="Çeviri dili"></div>
             <div class="row">
                 <div>
                     <span class="label">Otomatik ekran çevirisi</span>

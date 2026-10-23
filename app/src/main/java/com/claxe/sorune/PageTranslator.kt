@@ -151,6 +151,7 @@ object PageTranslator {
         "fi" to "Fince", "cs" to "Çekçe", "hu" to "Macarca", "ro" to "Romence", "bg" to "Bulgarca",
         "az" to "Azerbaycanca", "hi" to "Hintçe", "id" to "Endonezyaca", "vi" to "Vietnamca", "th" to "Tayca",
         "he" to "İbranice", "iw" to "İbranice", "ka" to "Gürcüce", "kk" to "Kazakça", "sr" to "Sırpça",
+        "zh-cn" to "Çince",
     )
 
     private fun parsePairs(json: String): List<Pair<Int, String>> {
