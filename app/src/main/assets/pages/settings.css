@@ -146,3 +146,27 @@
 }
 .text:focus { border-color: var(--accent); }
 .row[hidden] { display: none; }
+.fonts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 6px 0 14px; }
+.font-choice {
+    height: 44px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--base);
+    color: var(--text);
+    font-size: 16px;
+    padding: 0 4px;
+    overflow: hidden;
+    white-space: nowrap;
+}
+.font-choice[aria-checked="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); color: var(--accent); }
+#nt-effect { margin-bottom: 6px; }
+.chip-button {
+    margin-top: 4px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+}

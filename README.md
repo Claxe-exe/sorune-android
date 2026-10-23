@@ -17,6 +17,9 @@
 - **Reklam ve açılır pencere engelleyici**, **gizli sekme**, **sayfada bul**, uzun basma menüsü (yeni/arka plan/gizli
   sekmede aç, kopyala, paylaş, resmi indir)
 - Adres çubuğu üstte ya da altta, yazı boyutu, sitelerde koyu mod, videoda resim içinde resim
+- **Yeni sekmeyi kişiselleştir:** saat ve kısayollar için 7 yazı tipi, 24/12 saat, efektler (yaprak, kar, kıvılcım,
+  baloncuk), karartma ve bulanıklık; kısayolları ekle, sil, sırala
+- **Okuma modu**, adres çubuğunda kaydırarak sekme değiştirme, aşağı çekip yenileme
 - **Sayfa çevirisi** (Google Çeviri, yerinde) ve **ekran çevirisi**: resimlerdeki yazılar dahil, webtoon okumak için;
   istersen **otomatik**, 3–20 saniyede bir ekran değişince
 - **Kitaplık:** geçmiş (arama, silme), yer imleri, indirmeler (ilerleme, dokununca aç); yer imleri yeni sekmede kısayol,

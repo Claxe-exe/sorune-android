@@ -1,3 +1,20 @@
+:root {
+    --clock-font: system-ui, sans-serif;
+    --label-font: system-ui, sans-serif;
+    --wall-blur: 0px;
+    --wall-dim: 0;
+}
+
+.wall { filter: blur(var(--wall-blur)); transform: scale(1.04); }
+.shade::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, var(--wall-dim));
+}
+
+.effects { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
 .page {
     position: relative;
     z-index: 1;
@@ -17,14 +34,17 @@
     color: var(--accent);
     text-shadow: 0 0 16px color-mix(in srgb, var(--accent) 60%, transparent);
 }
+.greeting[hidden] { display: none; }
 
 .clock {
     margin: 6px 0 0;
-    font-size: clamp(64px, 22vw, 110px);
-    font-weight: 200;
-    letter-spacing: -0.03em;
-    line-height: 1;
+    font-family: var(--clock-font);
+    font-size: clamp(58px, 20vw, 110px);
+    font-weight: 300;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
 }
+.clock.small { font-size: clamp(30px, 10vw, 54px); line-height: 1.4; }
 
 .date { margin: 8px 0 26px; font-size: 16px; color: var(--text-dim); }
 
@@ -51,6 +71,7 @@
 }
 
 .shortcut {
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -58,6 +79,7 @@
     border: 0;
     background: none;
     color: var(--text);
+    font-family: var(--label-font);
     font-size: 12px;
     padding: 0;
 }
@@ -70,7 +92,63 @@
     background: color-mix(in srgb, var(--surface) 70%, transparent);
     border: 1px solid var(--border);
     backdrop-filter: blur(12px);
+    font-size: 22px;
 }
 .shortcut .icon img { width: 28px; height: 28px; }
 .shortcut:active .icon { border-color: var(--accent); }
-.shortcut span { max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shortcut span { max-width: 76px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Editing: remove and move buttons on each shortcut */
+.shortcut .tools { display: none; }
+.editing .shortcut .tools { display: flex; gap: 4px; }
+.editing .shortcut .icon { animation: wiggle 0.35s ease-in-out infinite alternate; }
+.tools button {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 11px;
+    padding: 0;
+}
+.tools .remove { color: #ff8a8a; }
+@keyframes wiggle { from { transform: rotate(-2deg); } to { transform: rotate(2deg); } }
+
+.edit-row { display: flex; justify-content: center; margin-top: 18px; }
+.edit-toggle {
+    padding: 6px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface) 60%, transparent);
+    color: var(--text-dim);
+    font-size: 12px;
+    font-weight: 600;
+}
+.editing .edit-toggle { background: var(--accent); color: var(--base); border-color: var(--accent); }
+
+.add-form {
+    display: grid;
+    gap: 8px;
+    margin-top: 16px;
+    padding: 14px;
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface) 85%, transparent);
+}
+.add-form[hidden] { display: none; }
+.add-form input {
+    height: 40px;
+    padding: 0 12px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--base);
+    color: var(--text);
+    font-size: 15px;
+    outline: none;
+}
+.add-form input:focus { border-color: var(--accent); }
+.add-buttons { display: flex; justify-content: flex-end; gap: 8px; }
+.add-buttons button { padding: 8px 16px; border-radius: 999px; font-weight: 700; font-size: 13px; }
+.ghost { border: 1px solid var(--border); background: transparent; color: var(--text); }
+.solid { border: 0; background: var(--accent); color: var(--base); }

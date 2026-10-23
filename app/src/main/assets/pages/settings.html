@@ -4,8 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta http-equiv="Content-Security-Policy"
-          content="default-src 'none'; img-src https: data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'">
+          content="default-src 'none'; img-src https: data:; style-src 'self'; font-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'">
     <title>Ayarlar</title>
+    <link rel="stylesheet" href="fonts.css">
     <link rel="stylesheet" href="common.css">
     <link rel="stylesheet" href="settings.css">
 </head>
@@ -39,6 +40,58 @@
                     <input type="text" class="text" id="theme-name" maxlength="24" placeholder="Tema adı, ör. Gece mavisi" aria-label="Tema adı">
                     <button type="button" class="btn" id="save-theme">Kaydet ve uygula</button>
                 </div>
+            </div>
+        </section>
+
+        <section class="card">
+            <h2>Yeni sekme</h2>
+            <span class="label">Saatin yazı tipi</span>
+            <div class="fonts" id="clock-font" role="radiogroup" aria-label="Saatin yazı tipi"></div>
+            <span class="label">Kısayolların yazı tipi</span>
+            <div class="fonts" id="label-font" role="radiogroup" aria-label="Kısayolların yazı tipi"></div>
+            <span class="label">Saat</span>
+            <div class="segmented" id="hour12" role="radiogroup" aria-label="Saat biçimi">
+                <button type="button" data-value="24">24 saat</button>
+                <button type="button" data-value="12">12 saat</button>
+            </div>
+            <span class="label">Efekt</span>
+            <div class="segmented" id="nt-effect" role="radiogroup" aria-label="Yeni sekme efekti">
+                <button type="button" data-value="theme">Temanın</button>
+                <button type="button" data-value="none">Yok</button>
+                <button type="button" data-value="petals">Yaprak</button>
+                <button type="button" data-value="snow">Kar</button>
+                <button type="button" data-value="sparks">Kıvılcım</button>
+                <button type="button" data-value="bubbles">Baloncuk</button>
+            </div>
+            <div class="slider-row">
+                <span class="label" id="nt-dim-label"></span>
+                <input type="range" id="nt-dim" min="0" max="80" step="5" aria-label="Duvar kâğıdını karart">
+            </div>
+            <div class="slider-row">
+                <span class="label" id="nt-blur-label"></span>
+                <input type="range" id="nt-blur" min="0" max="20" step="1" aria-label="Duvar kâğıdını bulanıklaştır">
+            </div>
+            <div class="row" style="margin-top: 12px">
+                <div><span class="label">Selamlama</span><span class="hint">Saatin üstündeki "Günaydın" yazısı.</span></div>
+                <button type="button" class="switch" id="nt-greeting" role="switch" aria-label="Selamlama"></button>
+            </div>
+            <div class="row" style="margin-top: 12px">
+                <div><span class="label">Yer imleri kısayollarda</span><span class="hint">Yer imlerin kısayolların başında görünür.</span></div>
+                <button type="button" class="switch" id="nt-bookmarks" role="switch" aria-label="Yer imleri kısayollarda"></button>
+            </div>
+            <p class="hint" style="margin-top: 12px">Kısayolları yeni sekmedeki <strong>✎ Düzenle</strong> ile ekleyip silebilir, sıralayabilirsin.</p>
+            <button type="button" class="chip-button" id="nt-reset">Kısayolları varsayılana döndür</button>
+        </section>
+
+        <section class="card">
+            <h2>Hareketler</h2>
+            <div class="row">
+                <div><span class="label">Adres çubuğunda kaydırarak sekme değiştir</span><span class="hint">Adres çubuğunu sağa ya da sola hızlıca kaydır.</span></div>
+                <button type="button" class="switch" id="swipe-tabs" role="switch" aria-label="Kaydırarak sekme değiştir"></button>
+            </div>
+            <div class="row" style="margin-top: 12px">
+                <div><span class="label">Aşağı çekip yenile</span><span class="hint">Sayfanın en üstünde aşağı çekince yeniler. İçeride kayan sitelerde (webtoon okuyucuları) yanlışlıkla yenileyebilir.</span></div>
+                <button type="button" class="switch" id="pull-refresh" role="switch" aria-label="Aşağı çekip yenile"></button>
             </div>
         </section>
 

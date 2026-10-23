@@ -13,6 +13,8 @@ data class SoruneTheme(
     /** Made by the user from their own picture (stored in the app's folder, can be deleted). */
     val isCustom: Boolean,
     val thumbnail: String?,
+    /** The new tab's effect when the user keeps "theme's own" (petals, sparks, bubbles…). */
+    val particles: String,
     /** Where the character stands in the wallpaper (0 = left, 1 = right): kept in view on narrow screens. */
     val focusX: Float,
     val base: Int,
@@ -79,6 +81,7 @@ object Themes {
             wallpaper = root.optString("wallpaper").takeIf { it.isNotEmpty() },
             isCustom = root.optBoolean("custom", false),
             thumbnail = root.optString("thumbnail").takeIf { it.isNotEmpty() },
+            particles = root.optJSONObject("newTab")?.optString("particles")?.takeIf { it.isNotEmpty() } ?: "petals",
             focusX = root.optDouble("focusX", 0.5).toFloat().coerceIn(0f, 1f),
             base = Color.parseColor(c("base")),
             chromeTint = Color.parseColor(c("chromeTint", c("base"))),

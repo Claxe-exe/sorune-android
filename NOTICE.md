@@ -33,3 +33,9 @@ Sorune uses these packages under their own licenses / Sorune şu paketleri kendi
 
 The QR code encoder (`src/Claxe/Pages/qr.js`) follows the algorithm of Project Nayuki's QR Code generator (MIT).
 Weather data in the new tab widget comes from [Open-Meteo](https://open-meteo.com) (CC BY 4.0).
+
+## Fonts
+
+The fonts in `app/src/main/assets/fonts/` (Orbitron, Bebas Neue, Pacifico, Press Start 2P, Righteous,
+Dancing Script) come from [Google Fonts](https://github.com/google/fonts) and are licensed under the
+SIL Open Font License 1.1; each font's licence is next to it (`OFL-*.txt`).

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="tr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'none'; img-src https: data:; style-src 'self'; font-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'">
+    <title>Okuma modu</title>
+    <link rel="stylesheet" href="fonts.css">
+    <link rel="stylesheet" href="common.css">
+    <link rel="stylesheet" href="reader.css">
+</head>
+<body>
+    <header class="bar">
+        <button type="button" id="back" aria-label="Okuma modunu kapat">✕</button>
+        <span class="spacer"></span>
+        <button type="button" id="font" aria-label="Yazı tipini değiştir">Aa</button>
+        <button type="button" id="smaller" aria-label="Yazıyı küçült">A−</button>
+        <button type="button" id="bigger" aria-label="Yazıyı büyüt">A+</button>
+    </header>
+    <article class="article" id="article">
+        <p class="site" id="site"></p>
+        <h1 id="title"></h1>
+        <div id="body"></div>
+    </article>
+
+    <script src="bridge.js"></script>
+    <script src="reader.js"></script>
+</body>
+</html>

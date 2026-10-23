@@ -72,6 +72,9 @@ class MainActivity : AppCompatActivity() {
         val NEW_TAB = "${Themes.ASSET_ORIGIN}/pages/newtab.html"
         val SETTINGS = "${Themes.ASSET_ORIGIN}/pages/settings.html"
         val LIBRARY = "${Themes.ASSET_ORIGIN}/pages/library.html"
+        val READER = "${Themes.ASSET_ORIGIN}/pages/reader.html"
+        private val NEW_TAB_FONTS = setOf("system", "orbitron", "bebas", "pacifico", "pixel", "righteous", "script")
+        private val NEW_TAB_EFFECTS = setOf("theme", "none", "petals", "snow", "sparks", "bubbles")
         private const val DESKTOP_UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
         private const val UPDATE_INTERVAL_MS = 3 * 60 * 60 * 1000L
@@ -102,6 +105,9 @@ class MainActivity : AppCompatActivity() {
     /** Read from the network thread for every request, so kept outside the preferences. */
     @Volatile private var adBlockOn = true
     private val privateSupported get() = WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)
+    private lateinit var refresh: androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+    /** Articles waiting for their reader tab (by tab id). */
+    private val readerArticles = mutableMapOf<String, JSONObject>()
     private lateinit var findBar: LinearLayout
     private lateinit var findInput: EditText
     private lateinit var findCount: TextView
@@ -194,6 +200,16 @@ class MainActivity : AppCompatActivity() {
         tabSwitcher = findViewById(R.id.tabSwitcher)
         tabList = findViewById(R.id.tabList)
         fullscreen = findViewById(R.id.fullscreen)
+        refresh = findViewById(R.id.refresh)
+        refresh.setOnRefreshListener {
+            active?.webView?.reload()
+            refresh.postDelayed({ refresh.isRefreshing = false }, 1200)
+        }
+        // Only when the setting is on and the page is at its very top.
+        refresh.setOnChildScrollUpCallback { _, _ ->
+            !prefs.pullRefresh || customView != null || active?.webView?.let { it.scrollY > 0 || it.canScrollVertically(-1) } ?: true
+        }
+        setupTabSwipe()
 
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime())
@@ -349,6 +365,7 @@ class MainActivity : AppCompatActivity() {
         val index = tabs.indexOf(tab)
         if (index < 0) return
         tabs.removeAt(index)
+        readerArticles.remove(tab.id)
         content.removeView(tab.webView)
         tab.webView.destroy()
         if (tab.isPrivate && tabs.none { it.isPrivate }) deletePrivateProfile()
@@ -407,6 +424,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         override fun onPageFinished(view: WebView, url: String) {
+            if (tab === active) refresh.isRefreshing = false
             // The next page of a translated tab is translated too.
             if (tab.translateTarget != null && isWebPage(url)) lifecycleScope.launch {
                 delay(500)
@@ -547,6 +565,7 @@ class MainActivity : AppCompatActivity() {
         isNewTab(url) -> ""
         url.startsWith(SETTINGS) -> "sorune://ayarlar"
         url.startsWith(LIBRARY) -> "sorune://kitaplik"
+        url.startsWith(READER) -> "sorune://okuma"
         else -> url
     }
 
@@ -708,6 +727,7 @@ class MainActivity : AppCompatActivity() {
         menu.add(0, 1, 0, "Yeni sekme")
         if (privateSupported) menu.add(0, 15, 0, "Yeni gizli sekme")
         menu.add(0, 16, 4, "Sayfada bul").isEnabled = tab != null && isWebPage(tab.url)
+        menu.add(0, 18, 4, "Okuma modu").isEnabled = tab != null && isWebPage(tab.url)
         menu.add(0, 17, 9, if (adBlockOn) "Reklam engelleyici: ${tab?.blocked?.get() ?: 0} engellendi" else "Reklam engelleyici kapalı").apply {
             isCheckable = true
             isChecked = adBlockOn
@@ -740,6 +760,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 15 -> openTab(NEW_TAB, isPrivate = true)
                 16 -> openFind()
+                18 -> tab?.let { lifecycleScope.launch { openReader(it) } }
                 17 -> setAdBlock(!adBlockOn)
                 12 -> openLibrary("gecmis")
                 13 -> openLibrary("yer-imleri")
@@ -758,6 +779,96 @@ class MainActivity : AppCompatActivity() {
             true
         }
         popup.show()
+    }
+
+    /** One new tab setting, checked before it is kept. */
+    private fun setNewTabOption(key: String, value: Any?) {
+        val options = runCatching { JSONObject(prefs.newTab) }.getOrDefault(JSONObject())
+        when (key) {
+            "clockFont", "labelFont" -> (value as? String)?.takeIf { it in NEW_TAB_FONTS }?.let { options.put(key, it) } ?: return
+            "effect" -> (value as? String)?.takeIf { it in NEW_TAB_EFFECTS }?.let { options.put(key, it) } ?: return
+            "hour12", "greeting", "bookmarks" -> (value as? Boolean)?.let { options.put(key, it) } ?: return
+            "dim" -> (value as? Number)?.let { options.put(key, it.toInt().coerceIn(0, 80)) } ?: return
+            "blur" -> (value as? Number)?.let { options.put(key, it.toInt().coerceIn(0, 20)) } ?: return
+            else -> return
+        }
+        prefs.newTab = options.toString()
+        broadcast(config())
+        broadcast(settingsState())
+    }
+
+    // ---------------------------------------------------------------- swipe between tabs
+
+    /** A quick sideways swipe on the address bar goes to the next or previous tab. */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupTabSwipe() {
+        var flung = false
+        val detector = android.view.GestureDetector(this, object : android.view.GestureDetector.SimpleOnGestureListener() {
+            override fun onFling(e1: android.view.MotionEvent?, e2: android.view.MotionEvent, velocityX: Float, velocityY: Float): Boolean {
+                if (!prefs.swipeTabs || e1 == null || address.hasFocus() || tabs.size < 2) return false
+                val dx = e2.x - e1.x
+                val dy = e2.y - e1.y
+                if (Math.abs(dx) < dp(50) || Math.abs(dx) < Math.abs(dy) * 1.5f || Math.abs(velocityX) < 500) return false
+                flung = true
+                switchTab(if (dx < 0) 1 else -1)
+                return true
+            }
+        })
+        address.setOnTouchListener { _, event ->
+            if (event.actionMasked == android.view.MotionEvent.ACTION_DOWN) flung = false
+            detector.onTouchEvent(event)
+            // After a swipe the field must not take the tap as "start typing".
+            event.actionMasked == android.view.MotionEvent.ACTION_UP && flung
+        }
+    }
+
+    private fun switchTab(step: Int) {
+        val index = tabs.indexOf(active)
+        if (index < 0 || tabs.size < 2) return
+        val target = tabs[(index + step).mod(tabs.size)]
+        activate(target)
+        content.translationX = step * dp(40).toFloat()
+        content.alpha = 0.4f
+        content.animate().translationX(0f).alpha(1f).setDuration(180).start()
+    }
+
+    // ---------------------------------------------------------------- reader mode
+
+    /** Finds the article (the block with the most paragraph text) and returns its parts as plain data. */
+    private val readerScript = """
+        (() => {
+            let best = null, bestScore = 0;
+            for (const el of document.querySelectorAll("article, main, [role=main], div, section")) {
+                let score = 0;
+                for (const p of el.querySelectorAll(":scope > p, :scope > div > p")) score += (p.innerText || "").trim().length;
+                if (el.tagName === "ARTICLE") score *= 1.3;
+                if (score > bestScore) { bestScore = score; best = el; }
+            }
+            if (!best || bestScore < 400) return null;
+            const blocks = [];
+            for (const el of best.querySelectorAll("h1, h2, h3, p, img, blockquote, li")) {
+                if (blocks.length > 500) break;
+                if (el.closest("nav, footer, aside, form, button, figure figcaption")) continue;
+                if (el.tagName === "IMG") {
+                    if ((el.naturalWidth || el.width) >= 200 && /^https?:/.test(el.currentSrc || el.src)) blocks.push({ t: "img", src: el.currentSrc || el.src });
+                    continue;
+                }
+                const text = (el.innerText || "").replace(/\s+/g, " ").trim();
+                if (!text || (el.tagName === "LI" && text.length < 20)) continue;
+                blocks.push({ t: /^H/.test(el.tagName) ? "h" : el.tagName === "BLOCKQUOTE" ? "quote" : "p", text });
+            }
+            return { title: document.title, site: location.hostname.replace(/^www\./, ""), url: location.href, blocks };
+        })()
+    """.trimIndent()
+
+    private suspend fun openReader(tab: BrowserTab) {
+        val article = runCatching { org.json.JSONTokener(tab.webView.eval(readerScript)).nextValue() as? JSONObject }.getOrNull()
+        if (article == null) {
+            toast("Bu sayfada okunacak bir yazı bulamadım")
+            return
+        }
+        val reader = openTab(READER, index = tabs.indexOf(tab) + 1, isPrivate = tab.isPrivate)
+        readerArticles[reader.id] = article.put("type", "reader:article")
     }
 
     private fun setAdBlock(on: Boolean) {
@@ -912,6 +1023,34 @@ class MainActivity : AppCompatActivity() {
                 broadcast(settingsState())
             }
             "setAdBlock" -> setAdBlock(message.optBoolean("value", true))
+            "newtab:set" -> setNewTabOption(message.optString("key"), message.opt("value"))
+            "newtab:shortcuts" -> {
+                val items = JSONArray()
+                val list = message.optJSONArray("items") ?: JSONArray()
+                for (i in 0 until minOf(list.length(), 16)) {
+                    val item = list.optJSONObject(i) ?: continue
+                    val url = item.optString("url")
+                    if (!url.startsWith("http://") && !url.startsWith("https://")) continue
+                    items.put(JSONObject().put("name", item.optString("name").take(24)).put("url", url.take(2000)))
+                }
+                prefs.newTab = JSONObject(prefs.newTab).put("shortcuts", items).toString()
+                broadcast(config())
+            }
+            "newtab:resetShortcuts" -> {
+                prefs.newTab = JSONObject(prefs.newTab).apply { remove("shortcuts") }.toString()
+                broadcast(config())
+                broadcast(settingsState())
+            }
+            "setSwipeTabs" -> {
+                prefs.swipeTabs = message.optBoolean("value", true)
+                broadcast(settingsState())
+            }
+            "setPullRefresh" -> {
+                prefs.pullRefresh = message.optBoolean("value", false)
+                broadcast(settingsState())
+            }
+            "reader:get" -> readerArticles[tab.id]?.let { post(tab, it) }
+            "reader:close" -> closeTab(tab)
             "custom:pick" -> {
                 pickingFor = tab
                 runCatching { picturePicker.launch("image/*") }.onFailure { toast("Galeri açılamadı") }
@@ -972,7 +1111,8 @@ class MainActivity : AppCompatActivity() {
     private fun config(): JSONObject = JSONObject()
         .put("type", "config")
         .put("theme", JSONObject(theme.hex).put("id", theme.id).put("name", theme.name).put("wallpaper", Themes.wallpaperUrl(theme))
-            .put("focusX", theme.focusX.toDouble()))
+            .put("focusX", theme.focusX.toDouble()).put("particles", theme.particles))
+        .put("newtab", runCatching { JSONObject(prefs.newTab) }.getOrDefault(JSONObject()))
         .put("engine", SearchEngines.find(prefs.searchEngine).name)
         .put("bookmarks", JSONArray(library.bookmarks.take(8).map { JSONObject().put("name", it.title.ifBlank { it.url }).put("url", it.url) }))
         .put("version", BuildConfig.VERSION_NAME)
@@ -994,6 +1134,9 @@ class MainActivity : AppCompatActivity() {
         .put("siteDarkSupported", WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING))
         .put("textZoom", prefs.textZoom)
         .put("pip", prefs.pictureInPicture)
+        .put("newtab", runCatching { JSONObject(prefs.newTab) }.getOrDefault(JSONObject()))
+        .put("swipeTabs", prefs.swipeTabs)
+        .put("pullRefresh", prefs.pullRefresh)
         .put("autoSeconds", prefs.autoScreenSeconds)
         .put("version", BuildConfig.VERSION_NAME)
 
@@ -1319,6 +1462,8 @@ class MainActivity : AppCompatActivity() {
         tabsButton.background = roundRect(Color.TRANSPARENT, dp(7).toFloat(), theme.textPrimary, dp(2))
         menuButton.setColorFilter(theme.textPrimary)
         progress.progressTintList = android.content.res.ColorStateList.valueOf(theme.accent)
+        refresh.setColorSchemeColors(theme.accent)
+        refresh.setProgressBackgroundColorSchemeColor(theme.surface)
         suggestionScroll.background = roundRect(ColorUtils.setAlphaComponent(theme.surface, 250), 0f, theme.border)
         tabSwitcher.setBackgroundColor(ColorUtils.setAlphaComponent(theme.base, 245))
         findViewById<TextView>(R.id.tabSwitcherTitle).setTextColor(theme.textPrimary)

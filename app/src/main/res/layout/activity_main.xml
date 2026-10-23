@@ -71,11 +71,17 @@
             android:max="100"
             android:visibility="invisible" />
 
-        <FrameLayout
-            android:id="@+id/content"
+        <!-- Pull down to reload (optional, see settings) -->
+        <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+            android:id="@+id/refresh"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1">
+
+        <FrameLayout
+            android:id="@+id/content"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
 
             <ScrollView
                 android:id="@+id/suggestionScroll"
@@ -92,6 +98,7 @@
                     android:paddingBottom="6dp" />
             </ScrollView>
         </FrameLayout>
+        </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
     </LinearLayout>
 
     <!-- Tab overview -->

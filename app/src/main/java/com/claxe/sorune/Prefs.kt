@@ -54,6 +54,21 @@ class Prefs(context: Context) {
         get() = store.getBoolean("pip", true)
         set(value) = store.edit().putBoolean("pip", value).apply()
 
+    /** New tab look (fonts, clock, effect, dim, blur, own shortcuts), as JSON. */
+    var newTab: String
+        get() = store.getString("newTab", "{}") ?: "{}"
+        set(value) = store.edit().putString("newTab", value).apply()
+
+    /** Swipe the address bar sideways to switch tabs. */
+    var swipeTabs: Boolean
+        get() = store.getBoolean("swipeTabs", true)
+        set(value) = store.edit().putBoolean("swipeTabs", value).apply()
+
+    /** Pull the page down to reload (off: it can fire on sites that scroll inside a box, like webtoon readers). */
+    var pullRefresh: Boolean
+        get() = store.getBoolean("pullRefresh", false)
+        set(value) = store.edit().putBoolean("pullRefresh", value).apply()
+
     /** When updates were last looked for (ms); checked at most every few hours. */
     var lastUpdateCheck: Long
         get() = store.getLong("updateCheck", 0)

@@ -35,6 +35,7 @@ function renderSettings(state) {
         return holder;
     }));
 
+    renderNewTab(state);
     for (const button of $("toolbar-position").querySelectorAll("button"))
         button.setAttribute("aria-checked", String((button.dataset.value === "bottom") === Boolean(state.toolbarBottom)));
     if (!draggingZoom) $("text-zoom").value = state.textZoom || 100;
@@ -65,6 +66,67 @@ function renderSettings(state) {
     if (!draggingSeconds) $("auto-seconds").value = state.autoSeconds || 10;
     showSeconds(Number($("auto-seconds").value));
 }
+
+// ---------------------------------------------------------------- new tab
+
+const FONT_CHOICES = [
+    ["system", "Sade", "system-ui, sans-serif"],
+    ["orbitron", "Orbitron", "'Orbitron', sans-serif"],
+    ["bebas", "Bebas", "'Bebas Neue', sans-serif"],
+    ["righteous", "Righteous", "'Righteous', sans-serif"],
+    ["pacifico", "Pacifico", "'Pacifico', cursive"],
+    ["script", "El yazısı", "'Dancing Script', cursive"],
+    ["pixel", "Piksel", "'Press Start 2P', monospace"],
+];
+let draggingNewTab = null;
+
+function setNewTab(key, value) {
+    send({ type: "newtab:set", key, value });
+}
+
+function renderFonts(id, key, current, sample) {
+    $(id).replaceChildren(...FONT_CHOICES.map(([value, name, family]) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "font-choice";
+        button.setAttribute("aria-checked", String((current || "system") === value));
+        button.setAttribute("aria-label", name);
+        button.style.fontFamily = family;
+        button.textContent = sample;
+        button.addEventListener("click", () => setNewTab(key, value));
+        return button;
+    }));
+}
+
+function renderNewTab(state) {
+    const nt = state.newtab || {};
+    renderFonts("clock-font", "clockFont", nt.clockFont, "12:34");
+    renderFonts("label-font", "labelFont", nt.labelFont, "Aa");
+    for (const b of $("hour12").querySelectorAll("button")) b.setAttribute("aria-checked", String((b.dataset.value === "12") === Boolean(nt.hour12)));
+    for (const b of $("nt-effect").querySelectorAll("button")) b.setAttribute("aria-checked", String(b.dataset.value === (nt.effect || "theme")));
+    if (draggingNewTab !== "dim") $("nt-dim").value = nt.dim || 0;
+    if (draggingNewTab !== "blur") $("nt-blur").value = nt.blur || 0;
+    $("nt-dim-label").textContent = `Karartma %${$("nt-dim").value}`;
+    $("nt-blur-label").textContent = `Bulanıklık ${$("nt-blur").value} px`;
+    $("nt-greeting").setAttribute("aria-checked", String(nt.greeting !== false));
+    $("nt-greeting").onclick = () => setNewTab("greeting", nt.greeting === false);
+    $("nt-bookmarks").setAttribute("aria-checked", String(nt.bookmarks !== false));
+    $("nt-bookmarks").onclick = () => setNewTab("bookmarks", nt.bookmarks === false);
+    $("swipe-tabs").setAttribute("aria-checked", String(Boolean(state.swipeTabs)));
+    $("swipe-tabs").onclick = () => send({ type: "setSwipeTabs", value: !state.swipeTabs });
+    $("pull-refresh").setAttribute("aria-checked", String(Boolean(state.pullRefresh)));
+    $("pull-refresh").onclick = () => send({ type: "setPullRefresh", value: !state.pullRefresh });
+}
+
+$("hour12").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setNewTab("hour12", b.dataset.value === "12"); });
+$("nt-effect").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setNewTab("effect", b.dataset.value); });
+for (const [id, key, label] of [["nt-dim", "dim", (v) => `Karartma %${v}`], ["nt-blur", "blur", (v) => `Bulanıklık ${v} px`]]) {
+    $(id).addEventListener("input", () => { draggingNewTab = key; $(id + "-label").textContent = label($(id).value); });
+    $(id).addEventListener("change", () => { draggingNewTab = null; setNewTab(key, Number($(id).value)); });
+}
+$("nt-reset").addEventListener("click", () => {
+    if (confirm("Kısayollar varsayılana dönsün mü?")) send({ type: "newtab:resetShortcuts" });
+});
 
 let draggingZoom = false;
 $("text-zoom").addEventListener("input", () => { draggingZoom = true; $("text-zoom-label").textContent = `Yazı boyutu %${$("text-zoom").value}`; });
