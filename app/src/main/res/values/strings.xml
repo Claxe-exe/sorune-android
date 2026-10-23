@@ -4,7 +4,7 @@
     <string name="address_hint">Ara veya adres yaz</string>
     <string name="tabs">Sekmeler</string>
     <string name="new_tab">Yeni sekme</string>
-    <string name="more">Diğer</string>
+    <string name="more">Menü</string>
     <string name="close_tab">Sekmeyi kapat</string>
     <string name="widget_hint">Sorune\'de ara</string>
     <string name="widget_description">Ana ekrandan Sorune ile ara</string>

@@ -221,6 +221,8 @@ class MainActivity : AppCompatActivity() {
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime())
             frame.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insetTop = bars.top
+            insetBottom = bars.bottom
             tabSwitcher.setPadding(bars.left, bars.top, bars.right, bars.bottom)
             insets
         }
@@ -231,10 +233,11 @@ class MainActivity : AppCompatActivity() {
         deletePrivateProfile()
         createTranslationChip()
         createFindBar()
+        createDrawer()
         applyToolbarPosition()
         setupAddressBar()
         tabsButton.setOnClickListener { showTabSwitcher() }
-        menuButton.setOnClickListener { showMenu() }
+        menuButton.setOnClickListener { if (drawerOpen) closeDrawer() else openDrawer() }
         findViewById<TextView>(R.id.newTabButton).setOnClickListener {
             hideTabSwitcher()
             openTab(NEW_TAB)
@@ -373,11 +376,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun activate(tab: BrowserTab) {
-        if (active !== tab) {
+        val changed = active !== tab
+        if (changed) {
             active?.webView?.apply { visibility = View.GONE; onPause() }
         }
         active = tab
         tab.webView.visibility = View.VISIBLE
+        if (changed) fadeIn(tab.webView, 0, 200)
         tab.webView.onResume()
         showAddress(tab)
         showProgress(tab)
@@ -408,6 +413,7 @@ class MainActivity : AppCompatActivity() {
     private fun goBack() {
         when {
             customView != null -> active?.webView?.webChromeClient?.onHideCustomView()
+            drawerOpen -> closeDrawer()
             findBar.visibility == View.VISIBLE -> closeFind()
             tabSwitcher.visibility == View.VISIBLE -> hideTabSwitcher()
             suggestionScroll.visibility == View.VISIBLE || address.hasFocus() -> clearAddressFocus()
@@ -689,6 +695,7 @@ class MainActivity : AppCompatActivity() {
             })
             suggestions.addView(row)
         }
+        if (suggestionScroll.visibility != View.VISIBLE) fadeIn(suggestionScroll, -dp(6), 150)
         suggestionScroll.visibility = View.VISIBLE
         suggestionScroll.bringToFront()
     }
@@ -704,10 +711,23 @@ class MainActivity : AppCompatActivity() {
         clearAddressFocus()
         renderTabSwitcher()
         tabSwitcher.visibility = View.VISIBLE
+        fadeIn(tabSwitcher, dp(28), 230)
     }
 
     private fun hideTabSwitcher() {
-        tabSwitcher.visibility = View.GONE
+        if (tabSwitcher.visibility != View.VISIBLE) return
+        tabSwitcher.animate().alpha(0f).translationY(dp(20).toFloat()).setDuration(170)
+            .setInterpolator(android.view.animation.AccelerateInterpolator())
+            .withEndAction { tabSwitcher.visibility = View.GONE; tabSwitcher.alpha = 1f; tabSwitcher.translationY = 0f }.start()
+    }
+
+    /** Small entrance: fade from transparent while sliding [dy] pixels into place. */
+    private fun fadeIn(view: View, dy: Int, duration: Long) {
+        view.animate().cancel()
+        view.alpha = 0f
+        view.translationY = dy.toFloat()
+        view.animate().alpha(1f).translationY(0f).setDuration(duration)
+            .setInterpolator(android.view.animation.DecelerateInterpolator(1.5f)).start()
     }
 
     private fun renderTabSwitcher() {
@@ -756,68 +776,193 @@ class MainActivity : AppCompatActivity() {
 
     // ---------------------------------------------------------------- menu
 
-    private fun showMenu() {
+    // ---------------------------------------------------------------- side panel (☰)
+
+    private lateinit var drawerScrim: View
+    private lateinit var drawerPanel: ScrollView
+    private lateinit var drawerContent: LinearLayout
+    private var drawerOpen = false
+    private var insetTop = 0
+    private var insetBottom = 0
+
+    private fun createDrawer() {
+        drawerScrim = View(this).apply {
+            setBackgroundColor(Color.argb(150, 0, 0, 0))
+            alpha = 0f
+            visibility = View.GONE
+            setOnClickListener { closeDrawer() }
+        }
+        drawerContent = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        drawerPanel = ScrollView(this).apply {
+            visibility = View.GONE
+            elevation = dp(16).toFloat()
+            isVerticalScrollBarEnabled = false
+            addView(drawerContent)
+        }
+        root.addView(drawerScrim, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        val width = minOf(dp(320), (resources.displayMetrics.widthPixels * 0.84f).toInt())
+        root.addView(drawerPanel, FrameLayout.LayoutParams(width, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.START))
+    }
+
+    /** The panel slides in from the left, the page dims behind it. */
+    private fun openDrawer() {
         clearAddressFocus()
+        if (findBar.visibility == View.VISIBLE) closeFind()
+        buildDrawer()
+        drawerOpen = true
+        drawerPanel.background = roundRectCorners(ColorUtils.setAlphaComponent(theme.surface, 250), dp(22).toFloat())
+        drawerPanel.scrollTo(0, 0)
+        drawerScrim.visibility = View.VISIBLE
+        drawerPanel.visibility = View.VISIBLE
+        drawerScrim.bringToFront()
+        drawerPanel.bringToFront()
+        drawerPanel.translationX = -drawerPanel.layoutParams.width.toFloat()
+        drawerScrim.animate().alpha(1f).setDuration(220).start()
+        drawerPanel.animate().translationX(0f).setDuration(260)
+            .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f)).start()
+    }
+
+    private fun closeDrawer(then: (() -> Unit)? = null) {
+        if (!drawerOpen) { then?.invoke(); return }
+        drawerOpen = false
+        drawerScrim.animate().alpha(0f).setDuration(180).withEndAction { drawerScrim.visibility = View.GONE }.start()
+        drawerPanel.animate().translationX(-drawerPanel.layoutParams.width.toFloat()).setDuration(200)
+            .setInterpolator(android.view.animation.AccelerateInterpolator(1.4f))
+            .withEndAction { drawerPanel.visibility = View.GONE; then?.invoke() }.start()
+    }
+
+    private fun buildDrawer() {
         val tab = active
-        val popup = PopupMenu(this, menuButton)
-        val menu = popup.menu
-        menu.add(0, 1, 0, "Yeni sekme")
-        if (privateSupported) menu.add(0, 15, 0, "Yeni gizli sekme")
-        menu.add(0, 16, 4, "Sayfada bul").isEnabled = tab != null && isWebPage(tab.url)
-        menu.add(0, 18, 4, "Okuma modu").isEnabled = tab != null && isWebPage(tab.url)
-        menu.add(0, 19, 4, "Ana ekrana ekle").isEnabled = tab != null && isWebPage(tab.url)
-        menu.add(0, 17, 9, if (adBlockOn) "Reklam engelleyici: ${tab?.blocked?.get() ?: 0} engellendi" else "Reklam engelleyici kapalı").apply {
-            isCheckable = true
-            isChecked = adBlockOn
-        }
-        menu.add(0, 2, 1, "Yenile")
-        menu.add(0, 3, 2, "İleri").isEnabled = tab?.webView?.canGoForward() == true
-        menu.add(0, 4, 3, "Paylaş").isEnabled = tab != null && tab.url.startsWith("http")
-        val bookmarked = tab != null && library.isBookmarked(tab.url)
-        menu.add(0, 11, 3, if (bookmarked) "Yer iminden kaldır" else "Yer imlerine ekle").isEnabled = tab != null && isWebPage(tab.url)
-        menu.add(0, 12, 10, "Geçmiş")
-        menu.add(0, 13, 11, "Yer imleri")
-        menu.add(0, 14, 12, "İndirmeler")
-        menu.add(0, 5, 4, "Masaüstü sitesi").apply { isCheckable = true; isChecked = tab?.desktopMode == true }
         val web = tab != null && isWebPage(tab.url)
-        menu.add(0, 8, 5, if (tab?.translateTarget != null) "Orijinali göster" else "Sayfayı çevir (${PageTranslator.languageName(prefs.translateLanguage)})").isEnabled = web
-        menu.add(0, 9, 6, "Ekranı çevir (resimler dahil)").isEnabled = web
-        menu.add(0, 10, 7, "Otomatik ekran çevirisi").apply { isCheckable = true; isChecked = prefs.autoScreenTranslate }
-        menu.add(0, 6, 8, "Ayarlar ve temalar")
-        menu.add(0, 7, 9, "Güncellemeleri denetle")
-        popup.setOnMenuItemClickListener { item ->
-            when (item.itemId) {
-                1 -> openTab(NEW_TAB)
-                2 -> tab?.webView?.reload()
-                3 -> tab?.webView?.goForward()
-                4 -> tab?.let { share(it) }
-                11 -> tab?.let {
-                    val added = library.toggleBookmark(it.url, it.title)
-                    toast(if (added) "Yer imlerine eklendi" else "Yer iminden kaldırıldı")
-                    saveLibrary()
-                }
-                15 -> openTab(NEW_TAB, isPrivate = true)
-                16 -> openFind()
-                18 -> tab?.let { lifecycleScope.launch { openReader(it) } }
-                17 -> setAdBlock(!adBlockOn)
-                12 -> openLibrary("gecmis")
-                13 -> openLibrary("yer-imleri")
-                14 -> openLibrary("indirmeler")
-                5 -> tab?.let { toggleDesktop(it) }
-                19 -> tab?.let { addToHomeScreen(it) }
-                6 -> openSettings()
-                7 -> checkForUpdates(manual = true)
-                8 -> tab?.let { if (it.translateTarget != null) showOriginal(it) else lifecycleScope.launch { translatePage(it, quiet = false) } }
-                9 -> tab?.let { lifecycleScope.launch { translateScreen(it, quiet = false) } }
-                10 -> {
-                    prefs.autoScreenTranslate = !prefs.autoScreenTranslate
-                    toast(if (prefs.autoScreenTranslate) "Otomatik ekran çevirisi açık: her ${prefs.autoScreenSeconds} saniyede bakar" else "Otomatik ekran çevirisi kapalı")
-                    broadcast(settingsState())
-                }
-            }
-            true
+        val box = drawerContent
+        box.removeAllViews()
+        box.setPadding(dp(14), insetTop + dp(14), dp(14), insetBottom + dp(16))
+
+        // Header: logo, name, version
+        box.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(6), 0, 0, dp(12))
+            addView(ImageView(this@MainActivity).apply { setImageResource(R.drawable.sorune_logo) }, LinearLayout.LayoutParams(dp(40), dp(40)))
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), 0, 0, 0)
+                addView(TextView(this@MainActivity).apply { text = "Sorune"; textSize = 20f; setTextColor(theme.textPrimary); setTypeface(typeface, android.graphics.Typeface.BOLD) })
+                addView(TextView(this@MainActivity).apply { text = "Sürüm ${BuildConfig.VERSION_NAME}"; textSize = 12f; setTextColor(theme.textSecondary) })
+            })
+        })
+
+        // Quick buttons
+        val quick = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        fun quickButton(icon: String, label: String, action: () -> Unit) = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(0, dp(10), 0, dp(10))
+            background = roundRect(ColorUtils.setAlphaComponent(theme.base, 200), dp(14).toFloat(), theme.border)
+            foreground = rippleBackground()
+            addView(TextView(this@MainActivity).apply { text = icon; textSize = 18f; gravity = Gravity.CENTER })
+            addView(TextView(this@MainActivity).apply { text = label; textSize = 11f; gravity = Gravity.CENTER; setTextColor(theme.textSecondary); maxLines = 1 })
+            setOnClickListener { closeDrawer(action) }
         }
-        popup.show()
+        val quickItems = mutableListOf<Triple<String, String, () -> Unit>>(Triple("＋", "Yeni sekme") { openTab(NEW_TAB); Unit })
+        if (privateSupported) quickItems += Triple("🕶", "Gizli") { openTab(NEW_TAB, isPrivate = true); Unit }
+        quickItems += Triple("🕘", "Geçmiş") { openLibrary("gecmis") }
+        quickItems += Triple("★", "Yer imleri") { openLibrary("yer-imleri") }
+        quickItems += Triple("⬇", "İndirilen") { openLibrary("indirmeler") }
+        quickItems.forEachIndexed { i, (icon, label, action) ->
+            quick.addView(quickButton(icon, label, action), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                if (i > 0) marginStart = dp(6)
+            })
+        }
+        box.addView(quick)
+
+        fun section(title: String) = box.addView(TextView(this).apply {
+            text = title.uppercase()
+            textSize = 11f
+            letterSpacing = 0.12f
+            setTextColor(theme.accent)
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(dp(8), dp(18), 0, dp(6))
+        })
+        fun item(icon: String, label: String, enabled: Boolean = true, action: () -> Unit) = box.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), dp(11), dp(10), dp(11))
+            background = rippleBackground()
+            alpha = if (enabled) 1f else 0.4f
+            isEnabled = enabled
+            addView(TextView(this@MainActivity).apply { text = icon; textSize = 16f; gravity = Gravity.CENTER; setTextColor(theme.accent) }, LinearLayout.LayoutParams(dp(30), ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(TextView(this@MainActivity).apply { text = label; textSize = 15f; setTextColor(theme.textPrimary); setPadding(dp(10), 0, 0, 0) })
+            if (enabled) setOnClickListener { closeDrawer(action) }
+        })
+        fun toggle(icon: String, label: String, hint: String?, on: Boolean, enabled: Boolean = true, action: () -> Unit) = box.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), dp(8), dp(4), dp(8))
+            background = rippleBackground()
+            alpha = if (enabled) 1f else 0.4f
+            addView(TextView(this@MainActivity).apply { text = icon; textSize = 16f; gravity = Gravity.CENTER; setTextColor(theme.accent) }, LinearLayout.LayoutParams(dp(30), ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(10), 0, 0, 0)
+                addView(TextView(this@MainActivity).apply { text = label; textSize = 15f; setTextColor(theme.textPrimary) })
+                if (hint != null) addView(TextView(this@MainActivity).apply { text = hint; textSize = 12f; setTextColor(theme.textSecondary) })
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            val switch = androidx.appcompat.widget.SwitchCompat(this@MainActivity).apply {
+                isChecked = on
+                isEnabled = enabled
+                thumbTintList = android.content.res.ColorStateList(
+                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()), intArrayOf(theme.accent, theme.textSecondary))
+                trackTintList = android.content.res.ColorStateList(
+                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                    intArrayOf(ColorUtils.setAlphaComponent(theme.accent, 110), ColorUtils.setAlphaComponent(theme.textSecondary, 70)))
+                isClickable = false
+            }
+            addView(switch)
+            if (enabled) setOnClickListener {
+                switch.isChecked = !switch.isChecked
+                action()
+            }
+        })
+
+        section("Bu sayfa")
+        item("⟳", "Yenile", tab != null) { tab?.webView?.reload() }
+        item("→", "İleri", tab?.webView?.canGoForward() == true) { tab?.webView?.goForward() }
+        val bookmarked = tab != null && library.isBookmarked(tab.url)
+        item(if (bookmarked) "★" else "☆", if (bookmarked) "Yer iminden kaldır" else "Yer imlerine ekle", web) {
+            tab?.let {
+                val added = library.toggleBookmark(it.url, it.title)
+                toast(if (added) "Yer imlerine eklendi" else "Yer iminden kaldırıldı")
+                saveLibrary()
+            }
+        }
+        item("⌕", "Sayfada bul", web) { openFind() }
+        item("📖", "Okuma modu", web) { tab?.let { lifecycleScope.launch { openReader(it) } } }
+        item("⇪", "Paylaş", tab != null && tab.url.startsWith("http")) { tab?.let { share(it) } }
+        item("⌂", "Ana ekrana ekle", web) { tab?.let { addToHomeScreen(it) } }
+        toggle("🖥", "Masaüstü sitesi", "Bu site için hatırlanır", tab?.desktopMode == true, web) { tab?.let { toggleDesktop(it) } }
+
+        section("Çeviri")
+        item("🌐", if (tab?.translateTarget != null) "Orijinali göster" else "Sayfayı çevir (${PageTranslator.languageName(prefs.translateLanguage)})", web) {
+            tab?.let { if (it.translateTarget != null) showOriginal(it) else lifecycleScope.launch { translatePage(it, quiet = false) } }
+        }
+        item("🖼", "Ekranı çevir (resimler dahil)", web) { tab?.let { lifecycleScope.launch { translateScreen(it, quiet = false) } } }
+        toggle("🔁", "Otomatik ekran çevirisi", "Her ${prefs.autoScreenSeconds} saniyede, ekran değişince", prefs.autoScreenTranslate) {
+            prefs.autoScreenTranslate = !prefs.autoScreenTranslate
+            broadcast(settingsState())
+        }
+
+        section("Koruma")
+        toggle("🛡", "Reklam engelleyici", if (adBlockOn) "Bu sayfada ${tab?.blocked?.get() ?: 0} engellendi" else "Kapalı", adBlockOn) { setAdBlock(!adBlockOn) }
+
+        section("Sorune")
+        item("⚙", "Ayarlar ve temalar") { openSettings() }
+        item("⭳", "Güncellemeleri denetle") { checkForUpdates(manual = true) }
+    }
+
+    private fun roundRectCorners(fill: Int, radius: Float) = GradientDrawable().apply {
+        setColor(fill)
+        cornerRadii = floatArrayOf(0f, 0f, radius, radius, radius, radius, 0f, 0f)
     }
 
     /** One new tab setting, checked before it is kept. */
@@ -1366,6 +1511,7 @@ class MainActivity : AppCompatActivity() {
         for (i in 2 until findBar.childCount) (findBar.getChildAt(i) as TextView).setTextColor(theme.textPrimary)
         findBar.visibility = View.VISIBLE
         findBar.bringToFront()
+        fadeIn(findBar, -dp(12), 180)
         findInput.setText("")
         findInput.requestFocus()
         (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(findInput, 0)
@@ -1521,6 +1667,7 @@ class MainActivity : AppCompatActivity() {
         translationChip.text = "🌐 ${PageTranslator.languageName(tab.translatedFrom)} → ${PageTranslator.languageName(tab.translateTarget)}" + (if (tab.translating) " …" else "") + "   ✕"
         translationChip.setTextColor(theme.textPrimary)
         translationChip.background = roundRect(ColorUtils.setAlphaComponent(theme.surface, 235), dp(18).toFloat(), theme.accent, dp(1))
+        if (translationChip.visibility != View.VISIBLE) fadeIn(translationChip, dp(10), 200)
         translationChip.visibility = View.VISIBLE
         translationChip.bringToFront()
     }

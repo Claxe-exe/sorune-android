@@ -41,3 +41,8 @@ html, body {
 }
 
 button { font: inherit; }
+
+/* Pages fade in when they open */
+body { animation: page-in 0.28s ease-out both; }
+@keyframes page-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { body { animation: none; } }
