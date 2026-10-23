@@ -12,7 +12,11 @@
 ## ✨ Özellikler
 
 - Sekmeler, adres çubuğu, arama motoru önerileri (Google, DuckDuckGo, Bing, Brave)
-- Masaüstüyle aynı **Sorune temaları**: duvar kâğıdı, renkler ve yeni sekme sayfası
+- Masaüstüyle aynı **Sorune temaları**: duvar kâğıdı, renkler ve yeni sekme sayfası; **kendi temanı yap**: galeriden
+  resim, resimden çıkan renk paleti, karakterin yeri
+- **Reklam ve açılır pencere engelleyici**, **gizli sekme**, **sayfada bul**, uzun basma menüsü (yeni/arka plan/gizli
+  sekmede aç, kopyala, paylaş, resmi indir)
+- Adres çubuğu üstte ya da altta, yazı boyutu, sitelerde koyu mod, videoda resim içinde resim
 - **Sayfa çevirisi** (Google Çeviri, yerinde) ve **ekran çevirisi**: resimlerdeki yazılar dahil, webtoon okumak için;
   istersen **otomatik**, 3–20 saniyede bir ekran değişince
 - **Kitaplık:** geçmiş (arama, silme), yer imleri, indirmeler (ilerleme, dokununca aç); yer imleri yeni sekmede kısayol,

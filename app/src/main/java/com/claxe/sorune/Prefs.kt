@@ -29,6 +29,31 @@ class Prefs(context: Context) {
         get() = store.getInt("autoScreenSeconds", 10).coerceIn(3, 20)
         set(value) = store.edit().putInt("autoScreenSeconds", value.coerceIn(3, 20)).apply()
 
+    /** Ads and pop-ups blocked (on unless turned off). */
+    var adBlock: Boolean
+        get() = store.getBoolean("adBlock", true)
+        set(value) = store.edit().putBoolean("adBlock", value).apply()
+
+    /** Address bar at the bottom, within thumb's reach. */
+    var toolbarBottom: Boolean
+        get() = store.getBoolean("toolbarBottom", false)
+        set(value) = store.edit().putBoolean("toolbarBottom", value).apply()
+
+    /** Sites shown dark (their own dark theme, or darkened by Android when they have none). */
+    var siteDark: Boolean
+        get() = store.getBoolean("siteDark", false)
+        set(value) = store.edit().putBoolean("siteDark", value).apply()
+
+    /** Page text size, 50–200 %. */
+    var textZoom: Int
+        get() = store.getInt("textZoom", 100).coerceIn(50, 200)
+        set(value) = store.edit().putInt("textZoom", value.coerceIn(50, 200)).apply()
+
+    /** A fullscreen video keeps playing in a small window when leaving Sorune. */
+    var pictureInPicture: Boolean
+        get() = store.getBoolean("pip", true)
+        set(value) = store.edit().putBoolean("pip", value).apply()
+
     /** When updates were last looked for (ms); checked at most every few hours. */
     var lastUpdateCheck: Long
         get() = store.getLong("updateCheck", 0)

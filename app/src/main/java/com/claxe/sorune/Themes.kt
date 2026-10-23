@@ -10,6 +10,9 @@ data class SoruneTheme(
     val name: String,
     val description: String,
     val wallpaper: String?,
+    /** Made by the user from their own picture (stored in the app's folder, can be deleted). */
+    val isCustom: Boolean,
+    val thumbnail: String?,
     /** Where the character stands in the wallpaper (0 = left, 1 = right): kept in view on narrow screens. */
     val focusX: Float,
     val base: Int,
@@ -43,20 +46,25 @@ object Themes {
     /** Pages reach the theme files under this address (served from the app's assets). */
     const val ASSET_ORIGIN = "https://appassets.androidplatform.net"
 
+    /** The built-in themes, then the user's own. */
     fun list(context: Context): List<SoruneTheme> =
         (context.assets.list("themes") ?: emptyArray())
             .filter { it.endsWith(".json") }
             .mapNotNull { file -> runCatching { parse(context.assets.open("themes/$file").bufferedReader().use { it.readText() }) }.getOrNull() }
-            .sortedWith(compareBy({ it.id != DEFAULT_ID }, { it.name }))
+            .sortedWith(compareBy({ it.id != DEFAULT_ID }, { it.name })) + CustomThemes.list(context)
 
     fun find(context: Context, id: String?): SoruneTheme {
         val all = list(context)
         return all.firstOrNull { it.id == id } ?: all.first()
     }
 
-    fun wallpaperUrl(theme: SoruneTheme): String? = theme.wallpaper?.let { "$ASSET_ORIGIN/themes/$it" }
+    fun wallpaperUrl(theme: SoruneTheme): String? = theme.wallpaper?.let {
+        if (theme.isCustom) "$ASSET_ORIGIN${CustomThemes.URL_PATH}$it" else "$ASSET_ORIGIN/themes/$it"
+    }
 
-    fun thumbUrl(theme: SoruneTheme): String? = theme.wallpaper?.let { "$ASSET_ORIGIN/themes/thumbs/$it" }
+    fun thumbUrl(theme: SoruneTheme): String? =
+        if (theme.isCustom) (theme.thumbnail ?: theme.wallpaper)?.let { "$ASSET_ORIGIN${CustomThemes.URL_PATH}$it" }
+        else theme.wallpaper?.let { "$ASSET_ORIGIN/themes/thumbs/$it" }
 
     fun parse(json: String): SoruneTheme {
         val root = JSONObject(json)
@@ -69,6 +77,8 @@ object Themes {
             name = root.getString("name"),
             description = root.optString("description"),
             wallpaper = root.optString("wallpaper").takeIf { it.isNotEmpty() },
+            isCustom = root.optBoolean("custom", false),
+            thumbnail = root.optString("thumbnail").takeIf { it.isNotEmpty() },
             focusX = root.optDouble("focusX", 0.5).toFloat().coerceIn(0f, 1f),
             base = Color.parseColor(c("base")),
             chromeTint = Color.parseColor(c("chromeTint", c("base"))),

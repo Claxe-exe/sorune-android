@@ -53,6 +53,8 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.webkit.JavaScriptReplyProxy
+import androidx.webkit.ProfileStore
+import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
@@ -73,12 +75,16 @@ class MainActivity : AppCompatActivity() {
         private const val DESKTOP_UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
         private const val UPDATE_INTERVAL_MS = 3 * 60 * 60 * 1000L
+        /** Private tabs share this profile; it is deleted (cookies, storage, cache) when the last one closes. */
+        private const val PRIVATE_PROFILE = "sorune-private"
     }
 
-    /** One tab: its page and what the chrome shows for it. */
-    inner class BrowserTab {
+    /** One tab: its page and what the chrome shows for it. A private tab lives in its own browser profile. */
+    inner class BrowserTab(val isPrivate: Boolean = false) {
         val id: String = UUID.randomUUID().toString()
-        val webView = WebView(this@MainActivity)
+        val webView = WebView(this@MainActivity).also { if (isPrivate) WebViewCompat.setProfile(it, PRIVATE_PROFILE) }
+        /** Ads and pop-ups held back on the current page (counted off the main thread). */
+        val blocked = java.util.concurrent.atomic.AtomicInteger()
         var title = ""
         var url = ""
         var progress = 100
@@ -92,6 +98,13 @@ class MainActivity : AppCompatActivity() {
         /** The last screen automatic translation handled (so the same screen is never sent twice). */
         var autoView: String? = null
     }
+
+    /** Read from the network thread for every request, so kept outside the preferences. */
+    @Volatile private var adBlockOn = true
+    private val privateSupported get() = WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)
+    private lateinit var findBar: LinearLayout
+    private lateinit var findInput: EditText
+    private lateinit var findCount: TextView
 
     private lateinit var translationChip: TextView
     private var screenTranslating = false
@@ -126,6 +139,27 @@ class MainActivity : AppCompatActivity() {
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var pendingInstall: File? = null
 
+    /** The settings page that asked for a picture (gets the palette back). */
+    private var pickingFor: BrowserTab? = null
+
+    private val picturePicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        val tab = pickingFor ?: return@registerForActivityResult
+        if (uri == null) return@registerForActivityResult
+        lifecycleScope.launch {
+            val palette = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { CustomThemes.stage(this@MainActivity, uri) }.getOrNull()
+            }
+            if (palette == null) {
+                toast("Bu resim açılamadı")
+                return@launch
+            }
+            post(tab, JSONObject()
+                .put("type", "custom:picked")
+                .put("preview", "${Themes.ASSET_ORIGIN}${CustomThemes.URL_PATH}pending.jpg?t=${System.currentTimeMillis()}")
+                .put("palette", JSONArray(palette.map { String.format("#%06X", 0xFFFFFF and it) })))
+        }
+    }
+
     private val fileChooser = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         fileCallback?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data))
         fileCallback = null
@@ -140,7 +174,10 @@ class MainActivity : AppCompatActivity() {
         prefs = Prefs(this)
         library = Library(File(filesDir, "library"))
         // Sorune's own pages and the theme pictures are served from the app's assets.
-        assetLoader = WebViewAssetLoader.Builder().addPathHandler("/", WebViewAssetLoader.AssetsPathHandler(this)).build()
+        assetLoader = WebViewAssetLoader.Builder()
+            .addPathHandler(CustomThemes.URL_PATH, WebViewAssetLoader.InternalStoragePathHandler(this, CustomThemes.folder(this)))
+            .addPathHandler("/", WebViewAssetLoader.AssetsPathHandler(this))
+            .build()
 
         root = findViewById(R.id.root)
         frame = findViewById(R.id.frame)
@@ -165,7 +202,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         wallpaper.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> fitWallpaper() }
+        adBlockOn = prefs.adBlock
+        // A private session left over from last time (Sorune closed with private tabs open) is wiped.
+        deletePrivateProfile()
         createTranslationChip()
+        createFindBar()
+        applyToolbarPosition()
         setupAddressBar()
         tabsButton.setOnClickListener { showTabSwitcher() }
         menuButton.setOnClickListener { showMenu() }
@@ -209,7 +251,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
-        prefs.saveSession(tabs.map { it.url }.filter { it.isNotEmpty() }, tabs.indexOf(active).coerceAtLeast(0))
+        // Private tabs are never saved.
+        val saved = tabs.filter { !it.isPrivate && it.url.isNotEmpty() }
+        prefs.saveSession(saved.map { it.url }, saved.indexOf(active).coerceAtLeast(0))
         saveLibrary()
         CookieManager.getInstance().flush()
         active?.webView?.onPause()
@@ -235,8 +279,9 @@ class MainActivity : AppCompatActivity() {
     // ---------------------------------------------------------------- tabs
 
     @SuppressLint("SetJavaScriptEnabled")
-    private fun createTab(): BrowserTab {
-        val tab = BrowserTab()
+    private fun createTab(isPrivate: Boolean = false): BrowserTab {
+        if (isPrivate) ProfileStore.getInstance().getOrCreateProfile(PRIVATE_PROFILE)
+        val tab = BrowserTab(isPrivate)
         val view = tab.webView
         view.settings.apply {
             javaScriptEnabled = true
@@ -249,7 +294,10 @@ class MainActivity : AppCompatActivity() {
             javaScriptCanOpenWindowsAutomatically = false
             // Without "wv" sites treat Sorune as the full Chrome-based browser it is (Google sign-in included).
             userAgentString = userAgentString.replace("; wv", "")
+            textZoom = prefs.textZoom
         }
+        applySiteDark(view)
+        view.setOnLongClickListener { onLongPress(tab) }
         CookieManager.getInstance().setAcceptThirdPartyCookies(view, true)
         view.setBackgroundColor(theme.base)
         view.webViewClient = PageClient(tab)
@@ -267,8 +315,8 @@ class MainActivity : AppCompatActivity() {
         return tab
     }
 
-    private fun openTab(url: String?, activate: Boolean = true, index: Int = tabs.size): BrowserTab {
-        val tab = createTab()
+    private fun openTab(url: String?, activate: Boolean = true, index: Int = tabs.size, isPrivate: Boolean = false): BrowserTab {
+        val tab = createTab(isPrivate)
         tabs.add(index.coerceIn(0, tabs.size), tab)
         tab.webView.visibility = View.GONE
         content.addView(tab.webView, 0, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -292,6 +340,8 @@ class MainActivity : AppCompatActivity() {
         showProgress(tab)
         updateTabsButton()
         updateTranslationChip()
+        styleChromeFor(tab)
+        if (findBar.visibility == View.VISIBLE) closeFind()
     }
 
     private fun closeTab(tab: BrowserTab) {
@@ -300,6 +350,7 @@ class MainActivity : AppCompatActivity() {
         tabs.removeAt(index)
         content.removeView(tab.webView)
         tab.webView.destroy()
+        if (tab.isPrivate && tabs.none { it.isPrivate }) deletePrivateProfile()
         if (tabs.isEmpty()) openTab(NEW_TAB)
         else if (active === tab) activate(tabs[(index - 1).coerceAtLeast(0)])
         updateTabsButton()
@@ -313,6 +364,7 @@ class MainActivity : AppCompatActivity() {
     private fun goBack() {
         when {
             customView != null -> active?.webView?.webChromeClient?.onHideCustomView()
+            findBar.visibility == View.VISIBLE -> closeFind()
             tabSwitcher.visibility == View.VISIBLE -> hideTabSwitcher()
             suggestionScroll.visibility == View.VISIBLE || address.hasFocus() -> clearAddressFocus()
             active?.webView?.canGoBack() == true -> active?.webView?.goBack()
@@ -323,8 +375,15 @@ class MainActivity : AppCompatActivity() {
     // ---------------------------------------------------------------- page events
 
     private inner class PageClient(private val tab: BrowserTab) : WebViewClient() {
-        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
-            assetLoader.shouldInterceptRequest(request.url)
+        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+            assetLoader.shouldInterceptRequest(request.url)?.let { return it }
+            // Ads and trackers: answered with nothing (the page itself is never blocked).
+            if (adBlockOn && !request.isForMainFrame && AdBlocker.isBlocked(request.url.host)) {
+                tab.blocked.incrementAndGet()
+                return WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
+            }
+            return null
+        }
 
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             val scheme = request.url.scheme?.lowercase() ?: return false
@@ -336,13 +395,14 @@ class MainActivity : AppCompatActivity() {
         override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
             tab.url = url
             tab.reply = null
+            tab.blocked.set(0)
             if (tab === active) showAddress(tab)
         }
 
         override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
             tab.url = url
             if (tab === active) showAddress(tab)
-            if (!isReload && isWebPage(url)) library.visit(url, tab.title)
+            if (!isReload && isWebPage(url) && !tab.isPrivate) library.visit(url, tab.title)
         }
 
         override fun onPageFinished(view: WebView, url: String) {
@@ -362,11 +422,16 @@ class MainActivity : AppCompatActivity() {
 
         override fun onReceivedTitle(view: WebView, title: String?) {
             tab.title = title.orEmpty()
-            if (isWebPage(tab.url)) library.titleFor(tab.url, tab.title)
+            if (isWebPage(tab.url) && !tab.isPrivate) library.titleFor(tab.url, tab.title)
         }
 
         override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message): Boolean {
-            val child = openTab(null, index = tabs.indexOf(tab) + 1)
+            // Windows a page opens by itself (not from a tap) are pop-up ads.
+            if (adBlockOn && !isUserGesture) {
+                tab.blocked.incrementAndGet()
+                return false
+            }
+            val child = openTab(null, index = tabs.indexOf(tab) + 1, isPrivate = tab.isPrivate)
             (resultMsg.obj as WebView.WebViewTransport).webView = child.webView
             resultMsg.sendToTarget()
             return true
@@ -604,7 +669,7 @@ class MainActivity : AppCompatActivity() {
             }
             val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             texts.addView(TextView(this).apply {
-                text = tab.title.ifEmpty { if (isNewTab(tab.url)) "Yeni sekme" else tab.url }
+                text = (if (tab.isPrivate) "🕶 " else "") + tab.title.ifEmpty { if (isNewTab(tab.url)) "Yeni sekme" else tab.url }
                 textSize = 15f
                 setTextColor(theme.textPrimary)
                 maxLines = 1
@@ -640,6 +705,12 @@ class MainActivity : AppCompatActivity() {
         val popup = PopupMenu(this, menuButton)
         val menu = popup.menu
         menu.add(0, 1, 0, "Yeni sekme")
+        if (privateSupported) menu.add(0, 15, 0, "Yeni gizli sekme")
+        menu.add(0, 16, 4, "Sayfada bul").isEnabled = tab != null && isWebPage(tab.url)
+        menu.add(0, 17, 9, if (adBlockOn) "Reklam engelleyici: ${tab?.blocked?.get() ?: 0} engellendi" else "Reklam engelleyici kapalı").apply {
+            isCheckable = true
+            isChecked = adBlockOn
+        }
         menu.add(0, 2, 1, "Yenile")
         menu.add(0, 3, 2, "İleri").isEnabled = tab?.webView?.canGoForward() == true
         menu.add(0, 4, 3, "Paylaş").isEnabled = tab != null && tab.url.startsWith("http")
@@ -666,6 +737,9 @@ class MainActivity : AppCompatActivity() {
                     toast(if (added) "Yer imlerine eklendi" else "Yer iminden kaldırıldı")
                     saveLibrary()
                 }
+                15 -> openTab(NEW_TAB, isPrivate = true)
+                16 -> openFind()
+                17 -> setAdBlock(!adBlockOn)
                 12 -> openLibrary("gecmis")
                 13 -> openLibrary("yer-imleri")
                 14 -> openLibrary("indirmeler")
@@ -683,6 +757,14 @@ class MainActivity : AppCompatActivity() {
             true
         }
         popup.show()
+    }
+
+    private fun setAdBlock(on: Boolean) {
+        prefs.adBlock = on
+        adBlockOn = on
+        toast(if (on) "Reklam engelleyici açık" else "Reklam engelleyici kapalı")
+        active?.webView?.reload()
+        broadcast(settingsState())
     }
 
     private fun share(tab: BrowserTab) {
@@ -828,6 +910,51 @@ class MainActivity : AppCompatActivity() {
                 prefs.autoScreenTranslate = message.optBoolean("value", false)
                 broadcast(settingsState())
             }
+            "setAdBlock" -> setAdBlock(message.optBoolean("value", true))
+            "custom:pick" -> {
+                pickingFor = tab
+                runCatching { picturePicker.launch("image/*") }.onFailure { toast("Galeri açılamadı") }
+            }
+            "custom:create" -> lifecycleScope.launch {
+                val accent = runCatching { Color.parseColor(message.optString("accent")) }.getOrDefault(theme.accent)
+                val id = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    runCatching {
+                        CustomThemes.create(this@MainActivity, message.optString("name"), accent, message.optDouble("focusX", 0.5).toFloat())
+                    }.getOrNull()
+                }
+                if (id == null) {
+                    toast("Tema kaydedilemedi")
+                    return@launch
+                }
+                prefs.themeId = id
+                applyTheme()
+                toast("Temana geçildi")
+            }
+            "custom:delete" -> {
+                val id = message.optString("id")
+                if (prefs.themeId == id) prefs.themeId = Themes.DEFAULT_ID
+                CustomThemes.delete(this, id)
+                applyTheme()
+            }
+            "setToolbarBottom" -> {
+                prefs.toolbarBottom = message.optBoolean("value", false)
+                applyToolbarPosition()
+                broadcast(settingsState())
+            }
+            "setSiteDark" -> {
+                prefs.siteDark = message.optBoolean("value", false)
+                tabs.forEach { applySiteDark(it.webView) }
+                broadcast(settingsState())
+            }
+            "setTextZoom" -> {
+                prefs.textZoom = message.optInt("value", 100)
+                tabs.forEach { it.webView.settings.textZoom = prefs.textZoom }
+                broadcast(settingsState())
+            }
+            "setPip" -> {
+                prefs.pictureInPicture = message.optBoolean("value", true)
+                broadcast(settingsState())
+            }
             "setAutoSeconds" -> {
                 prefs.autoScreenSeconds = message.optInt("value", 10)
                 broadcast(settingsState())
@@ -854,14 +981,195 @@ class MainActivity : AppCompatActivity() {
         .put("theme", theme.id)
         .put("themes", JSONArray(Themes.list(this).map {
             JSONObject().put("id", it.id).put("name", it.name).put("description", it.description)
-                .put("accent", it.hex["accent"]).put("thumb", Themes.thumbUrl(it))
+                .put("accent", it.hex["accent"]).put("thumb", Themes.thumbUrl(it)).put("custom", it.isCustom)
         }))
         .put("engine", prefs.searchEngine)
         .put("engines", JSONArray(SearchEngines.all.map { JSONObject().put("id", it.id).put("name", it.name) }))
         .put("suggest", prefs.searchSuggestions)
         .put("autoScreen", prefs.autoScreenTranslate)
+        .put("adBlock", prefs.adBlock)
+        .put("toolbarBottom", prefs.toolbarBottom)
+        .put("siteDark", prefs.siteDark)
+        .put("siteDarkSupported", WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING))
+        .put("textZoom", prefs.textZoom)
+        .put("pip", prefs.pictureInPicture)
         .put("autoSeconds", prefs.autoScreenSeconds)
         .put("version", BuildConfig.VERSION_NAME)
+
+    // ---------------------------------------------------------------- private tabs, dark sites
+
+    private fun deletePrivateProfile() {
+        if (!privateSupported) return
+        // Only possible once no tab uses it; a leftover is retried at the next start.
+        runCatching { ProfileStore.getInstance().deleteProfile(PRIVATE_PROFILE) }
+    }
+
+    private fun applySiteDark(view: WebView) {
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING))
+            WebSettingsCompat.setAlgorithmicDarkeningAllowed(view.settings, prefs.siteDark)
+    }
+
+    /** A private tab gets a black bar and says so in the address field. */
+    private fun styleChromeFor(tab: BrowserTab) {
+        val tint = if (tab.isPrivate) Color.argb(240, 6, 6, 8)
+            else ColorUtils.setAlphaComponent(theme.chromeTint, (theme.chromeTintOpacity * 255).toInt())
+        toolbar.setBackgroundColor(tint)
+        address.hint = if (tab.isPrivate) "🕶 Gizli sekme: ara veya adres yaz" else getString(R.string.address_hint)
+    }
+
+    // ---------------------------------------------------------------- long press
+
+    /** Links and pictures: open, copy, share, download. Anything else keeps the usual text selection. */
+    private fun onLongPress(tab: BrowserTab): Boolean {
+        val hit = tab.webView.hitTestResult
+        return when (hit.type) {
+            WebView.HitTestResult.SRC_ANCHOR_TYPE -> {
+                hit.extra?.let { showPressMenu(tab, link = it, image = null) }
+                hit.extra != null
+            }
+            WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE -> {
+                val image = hit.extra
+                // A picture inside a link: the link's address comes back asynchronously.
+                val handler = android.os.Handler(android.os.Looper.getMainLooper()) { message ->
+                    showPressMenu(tab, link = message.data.getString("url"), image = image)
+                    true
+                }
+                tab.webView.requestFocusNodeHref(handler.obtainMessage())
+                true
+            }
+            WebView.HitTestResult.IMAGE_TYPE -> {
+                hit.extra?.let { showPressMenu(tab, link = null, image = it) }
+                hit.extra != null
+            }
+            else -> false
+        }
+    }
+
+    private fun showPressMenu(tab: BrowserTab, link: String?, image: String?) {
+        val actions = mutableListOf<Pair<String, () -> Unit>>()
+        val web = { url: String? -> url != null && url.startsWith("http") }
+        if (web(link)) {
+            actions += "Yeni sekmede aç" to { openTab(link, isPrivate = tab.isPrivate); Unit }
+            actions += "Arka planda aç" to { openTab(link, activate = false, index = tabs.indexOf(tab) + 1, isPrivate = tab.isPrivate); toast("Arka planda açıldı") }
+            if (privateSupported && !tab.isPrivate) actions += "Gizli sekmede aç" to { openTab(link, isPrivate = true); Unit }
+            actions += "Bağlantıyı kopyala" to { copy(link!!) }
+            actions += "Bağlantıyı paylaş" to { shareText(link!!, null) }
+        }
+        if (web(image)) {
+            actions += "Resmi yeni sekmede aç" to { openTab(image, isPrivate = tab.isPrivate); Unit }
+            actions += "Resmi indir" to { download(image!!, tab.webView.settings.userAgentString, null, null) }
+            actions += "Resim adresini kopyala" to { copy(image!!) }
+        }
+        if (actions.isEmpty()) return
+        AlertDialog.Builder(this, R.style.Theme_Sorune_Dialog)
+            .setTitle((link ?: image)!!.removePrefix("https://").take(80))
+            .setItems(actions.map { it.first }.toTypedArray()) { _, which -> actions[which].second() }
+            .show()
+    }
+
+    private fun copy(text: String) {
+        (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+            .setPrimaryClip(android.content.ClipData.newPlainText("Sorune", text))
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) toast("Kopyalandı")
+    }
+
+    private fun shareText(text: String, subject: String?) {
+        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+            subject?.let { putExtra(Intent.EXTRA_SUBJECT, it) }
+        }, "Paylaş"))
+    }
+
+    // ---------------------------------------------------------------- find in page
+
+    private fun createFindBar() {
+        findBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(6), dp(4), dp(6))
+            elevation = dp(8).toFloat()
+            visibility = View.GONE
+        }
+        findInput = EditText(this).apply {
+            hint = "Sayfada bul"
+            textSize = 15f
+            isSingleLine = true
+            imeOptions = EditorInfo.IME_ACTION_SEARCH
+            background = null
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+                override fun afterTextChanged(s: Editable?) {
+                    active?.webView?.findAllAsync(s?.toString().orEmpty())
+                }
+            })
+            setOnEditorActionListener { _, _, _ -> active?.webView?.findNext(true); true }
+        }
+        findCount = TextView(this).apply { textSize = 13f; setPadding(dp(8), 0, dp(8), 0) }
+        fun button(label: String, action: () -> Unit) = TextView(this).apply {
+            text = label
+            textSize = 18f
+            gravity = Gravity.CENTER
+            setOnClickListener { action() }
+        }
+        findBar.addView(findInput, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        findBar.addView(findCount)
+        findBar.addView(button("˄") { active?.webView?.findNext(false) }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        findBar.addView(button("˅") { active?.webView?.findNext(true) }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        findBar.addView(button("✕") { closeFind() }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        content.addView(findBar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
+    }
+
+    private fun openFind() {
+        val tab = active ?: return
+        tab.webView.setFindListener { ordinal, matches, _ ->
+            findCount.text = if (findInput.text.isEmpty()) "" else if (matches == 0) "0/0" else "${ordinal + 1}/$matches"
+        }
+        findBar.background = roundRect(ColorUtils.setAlphaComponent(theme.surface, 245), 0f, theme.border)
+        findInput.setTextColor(theme.textPrimary)
+        findInput.setHintTextColor(theme.textSecondary)
+        findCount.setTextColor(theme.textSecondary)
+        for (i in 2 until findBar.childCount) (findBar.getChildAt(i) as TextView).setTextColor(theme.textPrimary)
+        findBar.visibility = View.VISIBLE
+        findBar.bringToFront()
+        findInput.setText("")
+        findInput.requestFocus()
+        (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(findInput, 0)
+    }
+
+    private fun closeFind() {
+        active?.webView?.clearMatches()
+        findBar.visibility = View.GONE
+        (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(findInput.windowToken, 0)
+    }
+
+    // ---------------------------------------------------------------- layout
+
+    /** The address bar at the top, or at the bottom within the thumb's reach. */
+    private fun applyToolbarPosition() {
+        frame.removeView(toolbar)
+        frame.removeView(progress)
+        if (prefs.toolbarBottom) {
+            frame.addView(progress)
+            frame.addView(toolbar)
+        } else {
+            frame.addView(toolbar, 0)
+            frame.addView(progress, 1)
+        }
+        (suggestionScroll.layoutParams as FrameLayout.LayoutParams).gravity = if (prefs.toolbarBottom) Gravity.BOTTOM else Gravity.TOP
+        suggestionScroll.requestLayout()
+    }
+
+    /** Leaving Sorune during a fullscreen video: it keeps playing in a small window. */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (customView != null && prefs.pictureInPicture && packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
+            runCatching {
+                enterPictureInPictureMode(android.app.PictureInPictureParams.Builder().setAspectRatio(android.util.Rational(16, 9)).build())
+            }
+        }
+    }
 
     // ---------------------------------------------------------------- translation
 
@@ -994,7 +1302,8 @@ class MainActivity : AppCompatActivity() {
         theme.wallpaper?.let { file ->
             runCatching {
                 val options = BitmapFactory.Options().apply { inSampleSize = 2 }
-                assets.open("themes/$file").use { wallpaper.setImageBitmap(BitmapFactory.decodeStream(it, null, options)) }
+                if (theme.isCustom) wallpaper.setImageBitmap(BitmapFactory.decodeFile(File(CustomThemes.folder(this), file).path, options))
+                else assets.open("themes/$file").use { wallpaper.setImageBitmap(BitmapFactory.decodeStream(it, null, options)) }
             }
         }
         fitWallpaper()
@@ -1017,6 +1326,7 @@ class MainActivity : AppCompatActivity() {
             background = roundRect(theme.accent, dp(20).toFloat())
         }
         tabs.forEach { it.webView.setBackgroundColor(theme.base) }
+        active?.let { styleChromeFor(it) }
         broadcast(config())
         broadcast(settingsState())
     }

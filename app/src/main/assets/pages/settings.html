@@ -26,6 +26,61 @@
         </section>
 
         <section class="card">
+            <h2>Kendi temanı yap</h2>
+            <p class="hint">Galeriden bir resim seç: duvar kâğıdı olur, Sorune ondan renkler çıkarır. Vurgu rengini ve karakterin yerini seçip kaydet.</p>
+            <button type="button" class="btn" id="pick">Galeriden resim seç</button>
+            <div class="creator" id="creator" hidden>
+                <div class="phone" id="phone"><span class="phone-bar"></span></div>
+                <div class="creator-fields">
+                    <span class="label">Vurgu rengi</span>
+                    <div class="swatches" id="palette"></div>
+                    <span class="label">Karakterin yeri</span>
+                    <input type="range" id="focus" min="0" max="100" value="50" aria-label="Karakterin yeri">
+                    <input type="text" class="text" id="theme-name" maxlength="24" placeholder="Tema adı, ör. Gece mavisi" aria-label="Tema adı">
+                    <button type="button" class="btn" id="save-theme">Kaydet ve uygula</button>
+                </div>
+            </div>
+        </section>
+
+        <section class="card">
+            <h2>Görünüm</h2>
+            <span class="label">Adres çubuğu</span>
+            <div class="segmented" id="toolbar-position" role="radiogroup" aria-label="Adres çubuğu konumu">
+                <button type="button" data-value="top">Üstte</button>
+                <button type="button" data-value="bottom">Altta</button>
+            </div>
+            <div class="slider-row">
+                <span class="label" id="text-zoom-label"></span>
+                <input type="range" id="text-zoom" min="50" max="200" step="10" aria-label="Yazı boyutu">
+            </div>
+            <div class="row" id="site-dark-row">
+                <div>
+                    <span class="label">Sitelerde koyu mod</span>
+                    <span class="hint">Siteler koyu temalarıyla açılır; koyu teması olmayanları Android karartır.</span>
+                </div>
+                <button type="button" class="switch" id="site-dark" role="switch" aria-label="Sitelerde koyu mod"></button>
+            </div>
+        </section>
+
+        <section class="card">
+            <h2>Gizlilik ve reklamlar</h2>
+            <div class="row">
+                <div>
+                    <span class="label">Reklam ve açılır pencere engelleyici</span>
+                    <span class="hint">Bilinen reklam ve takip sunucularını yüklemez, sayfanın kendiliğinden açtığı pencereleri engeller.</span>
+                </div>
+                <button type="button" class="switch" id="ad-block" role="switch" aria-label="Reklam engelleyici"></button>
+            </div>
+            <div class="row" style="margin-top: 12px">
+                <div>
+                    <span class="label">Resim içinde resim</span>
+                    <span class="hint">Tam ekran videodayken ana ekrana dönersen video küçük bir pencerede oynamaya devam eder.</span>
+                </div>
+                <button type="button" class="switch" id="pip" role="switch" aria-label="Resim içinde resim"></button>
+            </div>
+        </section>
+
+        <section class="card">
             <h2>Arama</h2>
             <div class="segmented" id="engines" role="radiogroup" aria-label="Arama motoru"></div>
             <div class="row">
