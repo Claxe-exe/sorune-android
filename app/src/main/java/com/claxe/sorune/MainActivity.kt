@@ -146,11 +146,12 @@ class MainActivity : AppCompatActivity() {
         val tab = pickingFor ?: return@registerForActivityResult
         if (uri == null) return@registerForActivityResult
         lifecycleScope.launch {
-            val palette = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching { CustomThemes.stage(this@MainActivity, uri) }.getOrNull()
+            val staged = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { CustomThemes.stage(this@MainActivity, uri) }
             }
-            if (palette == null) {
-                toast("Bu resim açılamadı")
+            val palette = staged.getOrElse { error ->
+                // The reason helps when a picture still can't be read.
+                toast("Bu resim açılamadı (${error.message ?: error.javaClass.simpleName})")
                 return@launch
             }
             post(tab, JSONObject()

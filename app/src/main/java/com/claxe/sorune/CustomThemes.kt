@@ -23,20 +23,42 @@ object CustomThemes {
     fun pendingFile(context: Context) = File(folder(context), PENDING)
 
     /**
-     * Copies the chosen picture in (scaled to at most 2048 px) and returns the colours offered
-     * for the accent. Null when it isn't a picture Android can read.
+     * Copies the chosen picture in (scaled to at most 2048 px, turned upright) and returns the
+     * colours offered for the accent. Throws with the reason when Android can't read it.
      */
-    fun stage(context: Context, uri: Uri): List<Int>? {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) } ?: return null
-        if (bounds.outWidth <= 0) return null
-        var sample = 1
-        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= MAX_SIDE) sample *= 2
-        val bitmap = context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
-        } ?: return null
+    fun stage(context: Context, uri: Uri): List<Int> {
+        val bitmap = decode(context, uri)
         pendingFile(context).outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
         return palette(bitmap)
+    }
+
+    /**
+     * ImageDecoder reads JPEG, PNG, WebP, GIF, HEIC/HEIF (phone cameras) and AVIF, and applies
+     * the photo's rotation; BitmapFactory is the fallback.
+     */
+    private fun decode(context: Context, uri: Uri): Bitmap {
+        val fromDecoder = runCatching {
+            val source = android.graphics.ImageDecoder.createSource(context.contentResolver, uri)
+            android.graphics.ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                decoder.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+                val width = info.size.width
+                val height = info.size.height
+                val scale = MAX_SIDE.toFloat() / maxOf(width, height)
+                if (scale < 1f) decoder.setTargetSize((width * scale).toInt().coerceAtLeast(1), (height * scale).toInt().coerceAtLeast(1))
+            }
+        }
+        fromDecoder.getOrNull()?.let { return it }
+
+        // Size first (this pass never returns a picture, only its dimensions), then the real read.
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        val stream = context.contentResolver.openInputStream(uri) ?: throw java.io.IOException("dosya açılamadı")
+        stream.use { BitmapFactory.decodeStream(it, null, bounds) }
+        if (bounds.outWidth <= 0) throw fromDecoder.exceptionOrNull() ?: java.io.IOException("desteklenmeyen biçim")
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= MAX_SIDE) sample *= 2
+        return context.contentResolver.openInputStream(uri)?.use {
+            BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
+        } ?: throw java.io.IOException("resim okunamadı")
     }
 
     /** Turns the staged picture into a theme; returns its id. */
