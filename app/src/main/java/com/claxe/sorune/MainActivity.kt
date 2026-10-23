@@ -94,6 +94,8 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var translationChip: TextView
     private var screenTranslating = false
+    /** Automatic screen translation waits until then after Google didn't answer or asked to slow down. */
+    private var autoPausedUntil = 0L
 
     private lateinit var prefs: Prefs
     private lateinit var theme: SoruneTheme
@@ -768,11 +770,16 @@ class MainActivity : AppCompatActivity() {
         screenTranslating = true
         if (!quiet) toast("Ekranı çeviriyorum…")
         try {
-            val note = ScreenTranslator.translateVisible(this, tab.webView, "tr")
-            when {
+            val outcome = ScreenTranslator.translateVisible(this, tab.webView, "tr")
+            val note = outcome.note
+            if (outcome.googleBusy) {
+                // Said once even while reading automatically; then automatic translation rests a minute.
+                if (!quiet || System.currentTimeMillis() >= autoPausedUntil) toast(note ?: "")
+                autoPausedUntil = System.currentTimeMillis() + 60_000
+            } else when {
                 note == null -> if (!quiet) toast("Çevirdim! Aşağı kaydırınca yine çevir.")
                 // "No text here" is normal while reading automatically (a picture without words).
-                !quiet || note != "Bu ekranda çevrilecek yazı bulamadım." -> toast(note)
+                !quiet || note != ScreenTranslator.NO_TEXT -> toast(note)
             }
         } catch (e: Exception) {
             if (!quiet) toast("Ekranı çeviremedim")
@@ -800,6 +807,7 @@ class MainActivity : AppCompatActivity() {
                 delay(prefs.autoScreenSeconds * 1000L)
                 val tab = active ?: continue
                 if (!prefs.autoScreenTranslate || screenTranslating || !isWebPage(tab.url) || tab.progress < 100
+                    || System.currentTimeMillis() < autoPausedUntil
                     || customView != null || tabSwitcher.visibility == View.VISIBLE || !hasWindowFocus()) continue
                 val before = tab.webView.eval(ScreenTranslator.VIEW)
                 delay(600)

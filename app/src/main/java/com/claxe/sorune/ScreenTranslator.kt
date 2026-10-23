@@ -12,6 +12,8 @@ import android.view.ViewGroup
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -74,6 +76,9 @@ object ScreenTranslator {
     private const val RESULT = """
         ((width) => {
             if (/consent\./.test(location.host)) return { state: "consent" };
+            // Too many pictures in a short time: Google asks to prove it's a person.
+            if (/\/sorry\//.test(location.pathname) || /unusual traffic|olağan dışı trafik|captcha/i.test(document.body ? document.body.innerText.slice(0, 2000) : ""))
+                return { state: "blocked" };
             const ready = [...document.querySelectorAll("button, [role=button]")]
                 .some((b) => /indir|download/i.test(b.getAttribute("aria-label") || b.textContent || ""));
             const image = [...document.querySelectorAll("img")].find((i) => i.src.startsWith("blob:") && i.naturalWidth === width);
@@ -133,34 +138,53 @@ object ScreenTranslator {
         })
     """
 
-    /** Null when it worked, otherwise a short note for the user. */
-    suspend fun translateVisible(activity: Activity, page: WebView, language: String): String? {
+    /** How it went: [note] for the user (null = translated); [googleBusy] = wait before trying again. */
+    data class Outcome(val note: String?, val googleBusy: Boolean = false)
+
+    const val NO_TEXT = "Bu ekranda çevrilecek yazı bulamadım."
+
+    suspend fun translateVisible(activity: Activity, page: WebView, language: String): Outcome {
         val view = runCatching { JSONTokener(page.eval(HIDE)).nextValue() as? JSONObject }.getOrNull()
         val screen = try {
+            // The earlier patches must be gone from the screen itself, or Google gets the
+            // already translated text back and nothing changes.
+            page.awaitDrawn()
+            delay(60)
             capture(activity, page)
         } finally {
             page.eval(SHOW)
-        } ?: return "Ekran görüntüsü alınamadı."
+        } ?: return Outcome("Ekran görüntüsü alınamadı.")
 
         val jpeg = withContext(Dispatchers.Default) {
             ByteArrayOutputStream().also { screen.compress(Bitmap.CompressFormat.JPEG, 88, it) }.toByteArray()
         }
-        val (translatedUrl, note) = runTranslate(activity, jpeg, screen.width, language)
-        if (note != null) return note
-        translatedUrl ?: return "Bu ekranda çevrilecek yazı bulamadım."
+        val (translatedUrl, failure) = runTranslate(activity, jpeg, screen.width, language)
+        if (failure != null) return failure
+        translatedUrl ?: return Outcome(NO_TEXT)
 
         val patch = withContext(Dispatchers.Default) {
             val bytes = Base64.decode(translatedUrl.substringAfter(','), Base64.DEFAULT)
             val translated = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@withContext null
             changedParts(screen, translated)
-        } ?: return "Bu ekranda çevrilecek yazı bulamadım."
+        } ?: return Outcome(NO_TEXT)
 
         val v = listOf("x", "y", "w", "h").map { view?.optDouble(it, 0.0) ?: 0.0 }
         page.eval(
             "($PLACE)(${patch.overlayWidth}, ${patch.overlayHeight}, ${patch.x}, ${patch.y}, ${patch.width}, ${patch.height}, " +
                 "\"${patch.rgba}\", ${v[0]}, ${v[1]}, ${v[2]}, ${v[3]}, ${JSONObject.quote("Ekran çevirisini kaldır")})"
         )
-        return null
+        return Outcome(null)
+    }
+
+    /** Waits until the page's current state (patches hidden) has reached the screen. */
+    private suspend fun WebView.awaitDrawn() {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.VISUAL_STATE_CALLBACK)) {
+            delay(150)
+            return
+        }
+        suspendCancellableCoroutine { done ->
+            WebViewCompat.postVisualStateCallback(this, 1L) { if (done.isActive) done.resume(Unit) }
+        }
     }
 
     /** The page as it is on screen (video and canvas included), scaled to at most 1600 px. */
@@ -181,7 +205,7 @@ object ScreenTranslator {
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    private suspend fun runTranslate(activity: Activity, jpeg: ByteArray, width: Int, language: String): Pair<String?, String?> {
+    private suspend fun runTranslate(activity: Activity, jpeg: ByteArray, width: Int, language: String): Pair<String?, Outcome?> {
         // A browser off the screen, as a desktop: Translate's image mode is the desktop page.
         val helper = WebView(activity).apply {
             settings.javaScriptEnabled = true
@@ -196,22 +220,27 @@ object ScreenTranslator {
             helper.loadUrl("https://translate.google.com/?sl=auto&tl=$language&op=images")
             val upload = "($UPLOAD)(${JSONObject.quote(Base64.encodeToString(jpeg, Base64.NO_WRAP))})"
             var sent = false
+            var state = "sayfa yüklenmedi"
             val deadline = System.currentTimeMillis() + TIMEOUT_MS
             while (System.currentTimeMillis() < deadline) {
                 delay(400)
                 if (helper.url?.contains("google.") != true) continue
                 if (!sent) {
                     sent = helper.eval(upload) == "\"sent\""
+                    state = if (sent) "gönderildi" else "yükleme alanı yok"
                     continue
                 }
                 val result = runCatching { JSONTokener(helper.eval("($RESULT)($width)")).nextValue() as? JSONObject }.getOrNull() ?: continue
-                when (result.optString("state")) {
+                state = result.optString("state")
+                when (state) {
                     "done" -> return result.optString("image") to null
-                    "error" -> return null to "Çevrilen resim okunamadı, tekrar dene."
-                    "consent" -> return null to "Google önce bir onay sayfası gösteriyor: google.com'u bir kez açıp seçimini yap, sonra tekrar dene."
+                    "error" -> return null to Outcome("Çevrilen resim okunamadı, tekrar dene.")
+                    "consent" -> return null to Outcome("Google önce bir onay sayfası gösteriyor: google.com'u bir kez açıp seçimini yap, sonra tekrar dene.")
+                    "blocked" -> return null to Outcome("Google kısa bir süreliğine çok sık istek gördü; biraz bekleyip tekrar dene.", googleBusy = true)
                 }
             }
-            return null to (if (sent) null else "Google Çeviri zamanında yanıt vermedi, tekrar dene.")
+            // No answer in time is not "no text": say so, and let automatic translation wait.
+            return null to Outcome("Google Çeviri zamanında yanıt vermedi ($state), biraz sonra tekrar dene.", googleBusy = true)
         } finally {
             root.removeView(helper)
             helper.destroy()
