@@ -806,7 +806,8 @@ class MainActivity : AppCompatActivity() {
             while (true) {
                 delay(prefs.autoScreenSeconds * 1000L)
                 val tab = active ?: continue
-                if (!prefs.autoScreenTranslate || screenTranslating || !isWebPage(tab.url) || tab.progress < 100
+                // (Not waiting for the page to finish loading: sites with ads may never get there.)
+                if (!prefs.autoScreenTranslate || screenTranslating || !isWebPage(tab.url)
                     || System.currentTimeMillis() < autoPausedUntil
                     || customView != null || tabSwitcher.visibility == View.VISIBLE || !hasWindowFocus()) continue
                 val before = tab.webView.eval(ScreenTranslator.VIEW)

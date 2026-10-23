@@ -39,22 +39,57 @@ object ScreenTranslator {
     private const val DESKTOP_UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 
-    /** Earlier patches are hidden while capturing; returns where the screen was (CSS pixels). */
+    /**
+     * Earlier patches are hidden while capturing; returns where the screen was (CSS pixels).
+     * Many mobile readers scroll a box inside the page instead of the page itself: that box (the
+     * first scrolling one around the middle of the screen) and its scroll position are kept, so
+     * the patches can go inside it and scroll with it.
+     */
     private const val HIDE = """
-        document.querySelectorAll("[data-sorune-lens]").forEach((el) => el.style.visibility = "hidden");
-        ({ x: scrollX, y: scrollY, w: innerWidth, h: innerHeight })
+        (() => {
+            document.querySelectorAll("[data-sorune-lens]").forEach((el) => el.style.visibility = "hidden");
+            // Look under fixed layers (readers often put an invisible tap catcher over the comic).
+            let box = null;
+            for (const hit of document.elementsFromPoint(innerWidth / 2, innerHeight / 2)) {
+                for (let el = hit; el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+                    const style = getComputedStyle(el);
+                    if (/(auto|scroll|overlay)/.test(style.overflowY) && el.scrollHeight > el.clientHeight + 4) { box = el; break; }
+                }
+                if (box) break;
+            }
+            if (box) {
+                const r = box.getBoundingClientRect();
+                window.__soruneBox = { el: box, left: box.scrollLeft - r.left, top: box.scrollTop - r.top };
+            } else {
+                window.__soruneBox = null;
+            }
+            return { x: scrollX, y: scrollY, w: innerWidth, h: innerHeight };
+        })()
     """
 
     private const val SHOW = """document.querySelectorAll("[data-sorune-lens]").forEach((el) => el.style.visibility = ""); true"""
 
     const val REMOVE = """document.querySelectorAll("[data-sorune-lens]").forEach((el) => el.remove()); true"""
 
-    /** Address, scroll, size, picture count and the middle element's position: the same answer twice means nothing moved. */
+    /**
+     * What the screen shows, in short: address, page scroll, size, picture count, and for the
+     * elements under the middle of the screen (fixed layers skipped) their position and the scroll
+     * of the box they scroll in. The same answer twice means nothing moved.
+     */
     const val VIEW = """
         (() => {
-            const middle = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
-            const top = middle ? Math.round(middle.getBoundingClientRect().top) : 0;
-            return [location.href, Math.round(scrollX), Math.round(scrollY), innerWidth, innerHeight, document.images.length, top].join("|");
+            const parts = [location.href, Math.round(scrollX), Math.round(scrollY), innerWidth, innerHeight, document.images.length];
+            let seen = 0;
+            for (const hit of document.elementsFromPoint(innerWidth / 2, innerHeight / 2)) {
+                if (seen >= 4 || hit === document.body || hit === document.documentElement) break;
+                if (/fixed|sticky/.test(getComputedStyle(hit).position) || hit.hasAttribute("data-sorune-lens")) continue;
+                parts.push(Math.round(hit.getBoundingClientRect().top));
+                for (let el = hit.parentElement; el && el !== document.body; el = el.parentElement) {
+                    if (el.scrollTop) { parts.push("s" + Math.round(el.scrollTop)); break; }
+                }
+                seen++;
+            }
+            return parts.join("|");
         })()
     """
 
@@ -100,10 +135,15 @@ object ScreenTranslator {
     private const val PLACE = """
         ((ow, oh, px, py, pw, ph, b64, vx, vy, vw, vh, label) => {
             if (!vw || !vh) { vx = scrollX; vy = scrollY; vw = innerWidth; vh = innerHeight; }
-            for (const old of document.querySelectorAll("canvas[data-sorune-lens]")) {
+            // Inside the scrolling box when the reader scrolls one, else on the page itself.
+            const box = window.__soruneBox && window.__soruneBox.el.isConnected ? window.__soruneBox : null;
+            const parent = box ? box.el : document.documentElement;
+            const ox = box ? box.left : vx, oy = box ? box.top : vy;
+            if (box && getComputedStyle(box.el).position === "static") box.el.style.position = "relative";
+            for (const old of parent.querySelectorAll(":scope > canvas[data-sorune-lens]")) {
                 const left = parseFloat(old.style.left), top = parseFloat(old.style.top);
-                if (left >= vx - 1 && top >= vy - 1 && left + parseFloat(old.style.width) <= vx + vw + 1
-                    && top + parseFloat(old.style.height) <= vy + vh + 1) old.remove();
+                if (left >= ox - 1 && top >= oy - 1 && left + parseFloat(old.style.width) <= ox + vw + 1
+                    && top + parseFloat(old.style.height) <= oy + vh + 1) old.remove();
             }
             const bytes = Uint8ClampedArray.from(atob(b64), (c) => c.charCodeAt(0));
             const canvas = document.createElement("canvas");
@@ -113,11 +153,11 @@ object ScreenTranslator {
             const sx = vw / ow, sy = vh / oh;
             canvas.dataset.soruneLens = "";
             Object.assign(canvas.style, {
-                position: "absolute", left: (vx + px * sx) + "px", top: (vy + py * sy) + "px",
+                position: "absolute", left: (ox + px * sx) + "px", top: (oy + py * sy) + "px",
                 width: (pw * sx) + "px", height: (ph * sy) + "px", zIndex: "2147483646",
                 pointerEvents: "none", margin: "0", padding: "0", border: "0", maxWidth: "none",
             });
-            document.documentElement.appendChild(canvas);
+            parent.appendChild(canvas);
             if (!document.querySelector("[data-sorune-lens-bar]")) {
                 const bar = document.createElement("div");
                 bar.dataset.soruneLens = "";
