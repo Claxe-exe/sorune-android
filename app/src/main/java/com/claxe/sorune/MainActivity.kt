@@ -955,6 +955,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** One line for the settings page: working, or the last time a service did not answer. */
+    private fun secureDnsStatus(): String {
+        if (!prefs.secureDns) return ""
+        val minutes = (System.currentTimeMillis() - SecureDns.lastProblemAt) / 60_000
+        val problem = SecureDns.lastProblem
+        return if (problem != null && minutes < 30) "Son sorun ($minutes dk önce): $problem. Diğer hizmetler denendi."
+            else "Çalışıyor: ${SecureDns.answered} adres güvenli DNS ile bulundu."
+    }
+
     /** No app may change private DNS itself: the address goes to the clipboard and the system settings open. */
     private fun openPrivateDnsSettings() {
         val clipboard = getSystemService(android.content.ClipboardManager::class.java)
@@ -1906,6 +1915,7 @@ class MainActivity : AppCompatActivity() {
         .put("privateLock", prefs.privateLock)
         .put("secureDns", prefs.secureDns)
         .put("dnsProvider", SecureDns.provider.id)
+        .put("dnsStatus", secureDnsStatus())
         .put("dnsProviders", JSONArray(SecureDns.Provider.entries.map {
             JSONObject().put("id", it.id).put("name", it.title).put("note", it.note).put("server", it.privateDns)
         }))

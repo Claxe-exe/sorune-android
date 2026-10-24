@@ -101,16 +101,45 @@ object SecureDns {
         }
     }
 
-    /** DNS-over-HTTPS first; the phone's own DNS only if the chosen service cannot be reached. */
+    /**
+     * DNS-over-HTTPS: the chosen service, then the others if it cannot be reached (the phone may
+     * have held back the network while Sorune was in the background). If none answers, an older
+     * answer is still better than the operator's, which for a blocked site is the block page.
+     * The phone's own DNS is the very last resort and is never remembered.
+     */
     private fun resolve(host: String): InetAddress {
         if (host.all { it.isDigit() || it == '.' } || ':' in host) return InetAddress.getByName(host)
         val now = System.currentTimeMillis()
-        cache[host]?.let { (address, until) -> if (until > now) return address }
-        val found = runCatching { lookup(host) }.getOrNull()
-        val address = found?.first ?: InetAddress.getByName(host)
-        cache[host] = address to now + (found?.second ?: 60L) * 1000
-        return address
+        val cached = cache[host]
+        if (cached != null && cached.second > now) return cached.first
+        val order = listOf(provider) + Provider.entries.filter { it != provider }
+        for (service in order) {
+            val found = try {
+                lookup(host, service.url)
+            } catch (e: Exception) {
+                failures++
+                lastProblem = "${service.title} cevap vermedi (${e.javaClass.simpleName})"
+                lastProblemAt = now
+                continue
+            }
+            // A working service with no address for the name: asking the others would not help.
+            if (found == null) break
+            answered++
+            cache[host] = found.first to now + found.second.coerceAtLeast(300) * 1000
+            return found.first
+        }
+        cached?.let { return it.first }
+        return InetAddress.getByName(host)
     }
+
+    @Volatile var answered = 0
+        private set
+    @Volatile var failures = 0
+        private set
+    @Volatile var lastProblem: String? = null
+        private set
+    @Volatile var lastProblemAt = 0L
+        private set
 
     /** Asks the chosen service (RFC 8484, the standard every one of them speaks): A first, then AAAA. */
     fun lookup(host: String, resolver: String = provider.url): Pair<InetAddress, Long>? {

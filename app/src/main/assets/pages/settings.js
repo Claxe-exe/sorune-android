@@ -152,6 +152,8 @@ function renderNewTab(state) {
         button.addEventListener("click", () => send({ type: "setDnsProvider", value: provider.id }));
         return button;
     }));
+    $("dns-status").textContent = state.dnsStatus || "";
+    $("dns-status").hidden = !state.dnsStatus;
     $("dns-server").textContent = ((state.dnsProviders || []).find((p) => p.id === state.dnsProvider) || {}).server || "";
     const dns = state.privateDns || {};
     $("dns-state").textContent = dns.active && dns.server
