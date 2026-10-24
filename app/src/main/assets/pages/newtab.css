@@ -6,7 +6,8 @@
     --card: 35%;
 }
 
-.wall { filter: blur(var(--wall-blur)); transform: scale(1.04); }
+/* Blur fades the picture's edges: it is enlarged a little more than the blur reaches. */
+.wall { filter: blur(var(--wall-blur)); transform: scale(calc(1.04 + var(--wall-blur-scale, 0))); }
 .shade::after {
     content: "";
     position: absolute;
@@ -19,7 +20,7 @@
 .page {
     position: relative;
     z-index: 1;
-    min-height: 100vh;
+    min-height: var(--full-h, 100vh);
     display: flex;
     flex-direction: column;
     justify-content: center;

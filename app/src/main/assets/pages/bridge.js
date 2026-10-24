@@ -54,9 +54,25 @@ function focusWallpaper(url, focusX) {
     image.src = url;
 }
 
+// The keyboard makes the page shorter. The wallpaper and the page keep the full height (--full-h)
+// so nothing jumps or rescales while typing; a new width (turned phone) starts over.
+let fullWidth = innerWidth;
+let fullHeight = innerHeight;
+function keepFullHeight() {
+    if (innerWidth !== fullWidth) {
+        fullWidth = innerWidth;
+        fullHeight = innerHeight;
+    } else {
+        fullHeight = Math.max(fullHeight, innerHeight);
+    }
+    document.documentElement.style.setProperty("--full-h", fullHeight + "px");
+}
+keepFullHeight();
+addEventListener("resize", keepFullHeight);
+
 function placeWallpaper() {
     if (!focus) return;
-    const visible = (innerWidth / innerHeight) / focus.ratio; // share of the picture's width on screen
+    const visible = (innerWidth / fullHeight) / focus.ratio; // share of the picture's width on screen
     const position = visible >= 1 ? 0.5 : Math.min(1, Math.max(0, (focus.x - visible / 2) / (1 - visible)));
     document.documentElement.style.setProperty("--wall-x", (position * 100).toFixed(1) + "%");
 }

@@ -45,7 +45,9 @@ function applyOptions() {
     const root = document.documentElement.style;
     root.setProperty("--clock-font", FONTS[options.clockFont] || FONTS.system);
     root.setProperty("--label-font", FONTS[options.labelFont] || FONTS.system);
-    root.setProperty("--wall-blur", `${Math.min(20, Math.max(0, Number(options.blur) || 0))}px`);
+    const blur = Math.min(20, Math.max(0, Number(options.blur) || 0));
+    root.setProperty("--wall-blur", `${blur}px`);
+    root.setProperty("--wall-blur-scale", String((blur * 4) / Math.max(320, Math.min(innerWidth, innerHeight))));
     root.setProperty("--wall-dim", String(Math.min(0.8, Math.max(0, (Number(options.dim) || 0) / 100))));
     showGlass(options.glass ?? 35);
     // The pixel font is wide: a smaller clock keeps it on one line.
@@ -202,8 +204,11 @@ function startEffect(name) {
 }
 
 function resize() {
+    // Like the wallpaper, the effects keep the full height while the keyboard is open.
+    const height = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--full-h")) || innerHeight;
     canvas.width = innerWidth * devicePixelRatio;
-    canvas.height = innerHeight * devicePixelRatio;
+    canvas.height = height * devicePixelRatio;
+    canvas.style.height = height + "px";
 }
 
 function spawn(anywhere) {
