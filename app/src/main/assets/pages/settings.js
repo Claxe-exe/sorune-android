@@ -36,6 +36,8 @@ function renderSettings(state) {
     }));
 
     renderNewTab(state);
+    for (const button of $("tabs-place").querySelectorAll("button"))
+        button.setAttribute("aria-checked", String((button.dataset.value === "menu") === Boolean(state.tabsInMenu)));
     for (const button of $("toolbar-position").querySelectorAll("button"))
         button.setAttribute("aria-checked", String((button.dataset.value === "bottom") === Boolean(state.toolbarBottom)));
     if (!draggingZoom) $("text-zoom").value = state.textZoom || 100;
@@ -143,6 +145,11 @@ $("nt-reset").addEventListener("click", () => {
 let draggingZoom = false;
 $("text-zoom").addEventListener("input", () => { draggingZoom = true; $("text-zoom-label").textContent = `Yazı boyutu %${$("text-zoom").value}`; });
 $("text-zoom").addEventListener("change", () => { draggingZoom = false; send({ type: "setTextZoom", value: Number($("text-zoom").value) }); });
+$("tabs-place").addEventListener("click", (event) => {
+    const button = event.target.closest("button");
+    if (button) send({ type: "setTabsInMenu", value: button.dataset.value === "menu" });
+});
+
 $("toolbar-position").addEventListener("click", (event) => {
     const button = event.target.closest("button");
     if (button) send({ type: "setToolbarBottom", value: button.dataset.value === "bottom" });

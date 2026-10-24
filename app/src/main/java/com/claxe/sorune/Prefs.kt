@@ -60,6 +60,10 @@ class Prefs(context: Context) {
         set(value) = store.edit().putString("newTab", value).apply()
 
     /** Swipe the address bar sideways to switch tabs. */
+    var tabsInMenu: Boolean
+        get() = store.getBoolean("tabsInMenu", false)
+        set(value) = store.edit().putBoolean("tabsInMenu", value).apply()
+
     var swipeTabs: Boolean
         get() = store.getBoolean("swipeTabs", true)
         set(value) = store.edit().putBoolean("swipeTabs", value).apply()

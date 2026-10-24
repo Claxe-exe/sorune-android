@@ -220,7 +220,13 @@ class MainActivity : AppCompatActivity() {
 
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime())
-            frame.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            // Gesture navigation (no tappable buttons at the bottom): the page runs under the thin
+            // gesture bar instead of leaving an empty strip. The keyboard and a bottom toolbar still push up.
+            val gestureNav = insets.getInsets(WindowInsetsCompat.Type.tappableElement()).bottom == 0
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+            val bottom = if (gestureNav && ime == 0 && !prefs.toolbarBottom) 0 else bars.bottom
+            frame.setPadding(bars.left, bars.top, bars.right, bottom)
+            if (::theme.isInitialized) window.navigationBarColor = if (gestureNav) Color.TRANSPARENT else theme.base
             insetTop = bars.top
             insetBottom = bars.bottom
             tabSwitcher.setPadding(bars.left, bars.top, bars.right, bars.bottom)
@@ -408,6 +414,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateTabsButton() {
         tabsButton.text = if (tabs.size > 99) ":)" else tabs.size.toString()
+        tabsButton.visibility = if (prefs.tabsInMenu) View.GONE else View.VISIBLE
     }
 
     private fun goBack() {
@@ -864,7 +871,9 @@ class MainActivity : AppCompatActivity() {
             addView(TextView(this@MainActivity).apply { text = label; textSize = 11f; gravity = Gravity.CENTER; setTextColor(theme.textSecondary); maxLines = 1 })
             setOnClickListener { closeDrawer(action) }
         }
-        val quickItems = mutableListOf<Triple<String, String, () -> Unit>>(Triple("＋", "Yeni sekme") { openTab(NEW_TAB); Unit })
+        val quickItems = mutableListOf<Triple<String, String, () -> Unit>>()
+        if (prefs.tabsInMenu) quickItems += Triple("▣ ${tabs.size}", "Sekmeler") { showTabSwitcher() }
+        quickItems += Triple("＋", "Yeni") { openTab(NEW_TAB); Unit }
         if (privateSupported) quickItems += Triple("🕶", "Gizli") { openTab(NEW_TAB, isPrivate = true); Unit }
         quickItems += Triple("🕘", "Geçmiş") { openLibrary("gecmis") }
         quickItems += Triple("★", "Yer imleri") { openLibrary("yer-imleri") }
@@ -1309,9 +1318,15 @@ class MainActivity : AppCompatActivity() {
                 CustomThemes.delete(this, id)
                 applyTheme()
             }
+            "setTabsInMenu" -> {
+                prefs.tabsInMenu = message.optBoolean("value", false)
+                updateTabsButton()
+                broadcast(settingsState())
+            }
             "setToolbarBottom" -> {
                 prefs.toolbarBottom = message.optBoolean("value", false)
                 applyToolbarPosition()
+                ViewCompat.requestApplyInsets(root)
                 broadcast(settingsState())
             }
             "setSiteDark" -> {
@@ -1369,6 +1384,7 @@ class MainActivity : AppCompatActivity() {
         .put("pip", prefs.pictureInPicture)
         .put("newtab", runCatching { JSONObject(prefs.newTab) }.getOrDefault(JSONObject()))
         .put("swipeTabs", prefs.swipeTabs)
+        .put("tabsInMenu", prefs.tabsInMenu)
         .put("translateLanguage", prefs.translateLanguage)
         .put("languages", JSONArray(TRANSLATE_LANGUAGES.map { JSONObject().put("id", it).put("name", PageTranslator.languageName(it)) }))
         .put("pullRefresh", prefs.pullRefresh)
@@ -1677,8 +1693,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun applyTheme() {
         theme = Themes.find(this, prefs.themeId)
-        window.navigationBarColor = theme.base
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) window.isNavigationBarContrastEnforced = false
         root.setBackgroundColor(theme.base)
+        ViewCompat.requestApplyInsets(root)
 
         theme.wallpaper?.let { file ->
             runCatching {
