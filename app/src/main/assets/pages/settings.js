@@ -130,6 +130,10 @@ function renderNewTab(state) {
     $("swipe-tabs").onclick = () => send({ type: "setSwipeTabs", value: !state.swipeTabs });
     $("pull-refresh").setAttribute("aria-checked", String(Boolean(state.pullRefresh)));
     $("pull-refresh").onclick = () => send({ type: "setPullRefresh", value: !state.pullRefresh });
+    $("hide-toolbar").setAttribute("aria-checked", String(Boolean(state.hideToolbar)));
+    $("hide-toolbar").onclick = () => send({ type: "setHideToolbar", value: !state.hideToolbar });
+    $("data-saver").setAttribute("aria-checked", String(Boolean(state.dataSaver)));
+    $("data-saver").onclick = () => send({ type: "setDataSaver", value: !state.dataSaver });
 }
 
 $("hour12").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setNewTab("hour12", b.dataset.value === "12"); });

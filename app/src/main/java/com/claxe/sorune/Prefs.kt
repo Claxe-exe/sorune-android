@@ -70,6 +70,14 @@ class Prefs(context: Context) {
         set(value) = store.edit().putBoolean("swipeTabs", value).apply()
 
     /** Pull the page down to reload (off: it can fire on sites that scroll inside a box, like webtoon readers). */
+    var hideToolbar: Boolean
+        get() = store.getBoolean("hideToolbar", true)
+        set(value) = store.edit().putBoolean("hideToolbar", value).apply()
+
+    var dataSaver: Boolean
+        get() = store.getBoolean("dataSaver", false)
+        set(value) = store.edit().putBoolean("dataSaver", value).apply()
+
     var pullRefresh: Boolean
         get() = store.getBoolean("pullRefresh", false)
         set(value) = store.edit().putBoolean("pullRefresh", value).apply()

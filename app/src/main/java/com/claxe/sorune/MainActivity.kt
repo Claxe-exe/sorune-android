@@ -99,6 +99,8 @@ class MainActivity : AppCompatActivity() {
         var progress = 100
         var desktopMode = false
         var favicon: android.graphics.Bitmap? = null
+        /** A small picture of the page for the tab overview, taken when the tab is left. */
+        var preview: android.graphics.Bitmap? = null
         /** Answers Sorune's own pages (new tab, settings) on the page's message channel. */
         var reply: JavaScriptReplyProxy? = null
         /** Page translation: on while set; stays on for the tab's next pages, like Chrome. */
@@ -348,6 +350,7 @@ class MainActivity : AppCompatActivity() {
         }
         applySiteDark(view)
         view.setOnLongClickListener { onLongPress(tab) }
+        view.setOnScrollChangeListener { _, _, y, _, oldY -> if (tab === active) onPageScroll(y, oldY) }
         CookieManager.getInstance().setAcceptThirdPartyCookies(view, true)
         view.setBackgroundColor(theme.base)
         view.webViewClient = PageClient(tab)
@@ -383,11 +386,13 @@ class MainActivity : AppCompatActivity() {
     private fun activate(tab: BrowserTab) {
         val changed = active !== tab
         if (changed) {
+            active?.takeIf { it in tabs }?.let { capturePreview(it) }
             active?.webView?.apply { visibility = View.GONE; onPause() }
         }
         active = tab
         tab.webView.visibility = View.VISIBLE
         if (changed) fadeIn(tab.webView, 0, 200)
+        setToolbarShown(true)
         tab.webView.onResume()
         showAddress(tab)
         showProgress(tab)
@@ -400,6 +405,11 @@ class MainActivity : AppCompatActivity() {
     private fun closeTab(tab: BrowserTab) {
         val index = tabs.indexOf(tab)
         if (index < 0) return
+        if (!tab.isPrivate && isWebPage(tab.url)) {
+            closedTabs += ClosedTab(tab.url, index)
+            if (closedTabs.size > 15) closedTabs.removeAt(0)
+            showUndo("Sekme kapatıldı") { reopenClosedTab() }
+        }
         tabs.removeAt(index)
         readerArticles.remove(tab.id)
         content.removeView(tab.webView)
@@ -459,7 +469,11 @@ class MainActivity : AppCompatActivity() {
             tab.url = url
             tab.reply = null
             tab.blocked.set(0)
-            if (tab === active) showAddress(tab)
+            applyDataSaver(tab)
+            if (tab === active) {
+                showAddress(tab)
+                setToolbarShown(true)
+            }
         }
 
         override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
@@ -592,6 +606,7 @@ class MainActivity : AppCompatActivity() {
         address.setOnFocusChangeListener { _, focused ->
             styleAddress(focused)
             if (focused) {
+                setToolbarShown(true)
                 active?.let { tab -> if (isNewTab(tab.url)) address.setText("") }
                 address.selectAll()
             } else {
@@ -626,23 +641,180 @@ class MainActivity : AppCompatActivity() {
     private var lastInsets: WindowInsetsCompat? = null
 
     /**
-     * No empty strip above the navigation bar: Sorune's own pages always run under it (they leave
-     * room themselves), web pages do with gesture navigation. The keyboard and a bottom toolbar still push up.
+     * No empty strips at the screen edges. The toolbar runs under the system bar on its own edge
+     * (status bar on top, navigation bar below), like the side panel. On the other edge Sorune's own
+     * pages always run under the bar (they leave room themselves), web pages do with gesture navigation.
+     * The keyboard still pushes everything up.
      */
     private fun applyFramePadding() {
         val insets = lastInsets ?: return
-        val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime())
+        val sys = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+        val withKeyboard = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime())
         val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
         // Some phones report the gesture bar as tappable; its small height gives it away.
-        val gestureNav = insets.getInsets(WindowInsetsCompat.Type.tappableElement()).bottom == 0 || nav < dp(44)
+        gestureNav = insets.getInsets(WindowInsetsCompat.Type.tappableElement()).bottom == 0 || nav < dp(44)
         // Some phones report a leftover keyboard height while it is closed: ask whether it is shown.
         val keyboard = insets.isVisible(WindowInsetsCompat.Type.ime())
         val ownPage = active?.let { !isWebPage(it.url) } ?: true
-        val bottom = if (keyboard || prefs.toolbarBottom || !(gestureNav || ownPage)) bars.bottom else 0
-        if (frame.paddingBottom != bottom || frame.paddingTop != bars.top) frame.setPadding(bars.left, bars.top, bars.right, bottom)
+        toolbarInsetTop = if (prefs.toolbarBottom) 0 else sys.top
+        toolbarInsetBottom = if (prefs.toolbarBottom && !keyboard) sys.bottom else 0
+        val top = if (prefs.toolbarBottom) sys.top else 0
+        val bottom = when {
+            keyboard -> withKeyboard.bottom
+            prefs.toolbarBottom || gestureNav || ownPage -> 0
+            else -> sys.bottom
+        }
+        if (frame.paddingBottom != bottom || frame.paddingTop != top) frame.setPadding(sys.left, top, sys.right, bottom)
+        toolbar.setPadding(toolbar.paddingLeft, toolbarInsetTop, toolbar.paddingRight, toolbarInsetBottom)
+        if (toolbarAnimator?.isRunning != true) setToolbarHeight(toolbarTargetHeight())
         if (::theme.isInitialized) window.navigationBarColor = if (gestureNav) Color.TRANSPARENT else theme.base
     }
 
+    // ---------------------------------------------------------------- toolbar hides while scrolling
+
+    private var toolbarInsetTop = 0
+    private var toolbarInsetBottom = 0
+    private var gestureNav = true
+    private var toolbarShown = true
+    private var toolbarAnimator: android.animation.ValueAnimator? = null
+    private var scrollSum = 0
+    private var ignoreScrollUntil = 0L
+
+    /** Hidden, the toolbar keeps only the status bar strip on top (the clock stays readable). */
+    private fun toolbarTargetHeight() =
+        if (toolbarShown) dp(60) + toolbarInsetTop + toolbarInsetBottom
+        else toolbarInsetTop + (if (gestureNav) 0 else toolbarInsetBottom)
+
+    private fun setToolbarHeight(height: Int) {
+        if (toolbar.layoutParams.height == height) return
+        toolbar.layoutParams.height = height
+        toolbar.requestLayout()
+    }
+
+    private fun setToolbarShown(show: Boolean) {
+        if (toolbarShown == show) return
+        toolbarShown = show
+        toolbarAnimator?.cancel()
+        // The page changes size while the bar moves: its scroll events then are not the reader's.
+        ignoreScrollUntil = android.os.SystemClock.uptimeMillis() + 400
+        toolbarAnimator = android.animation.ValueAnimator.ofInt(toolbar.layoutParams.height.coerceAtLeast(0), toolbarTargetHeight()).apply {
+            duration = 180
+            interpolator = android.view.animation.DecelerateInterpolator()
+            addUpdateListener {
+                setToolbarHeight(it.animatedValue as Int)
+                val alpha = if (show) it.animatedFraction else 1f - it.animatedFraction
+                for (i in 0 until toolbar.childCount) toolbar.getChildAt(i).alpha = alpha
+            }
+            start()
+        }
+    }
+
+    private fun onPageScroll(y: Int, oldY: Int) {
+        if (!prefs.hideToolbar || address.hasFocus() || findBar.visibility == View.VISIBLE) return
+        if (android.os.SystemClock.uptimeMillis() < ignoreScrollUntil) return
+        if (y < dp(56)) {
+            scrollSum = 0
+            setToolbarShown(true)
+            return
+        }
+        val dy = y - oldY
+        scrollSum = if ((dy > 0) == (scrollSum > 0)) scrollSum + dy else dy
+        if (scrollSum > dp(40)) setToolbarShown(false)
+        else if (scrollSum < -dp(40)) setToolbarShown(true)
+    }
+
+    // ---------------------------------------------------------------- tab previews and closed tabs
+
+    /** A small picture of what the tab shows, for the tab overview. */
+    private fun capturePreview(tab: BrowserTab) {
+        val view = tab.webView
+        if (view.width == 0 || view.height == 0 || view.visibility != View.VISIBLE) return
+        runCatching {
+            val scale = 0.3f
+            val height = minOf(view.height, (view.width * 1.3f).toInt())
+            val bitmap = android.graphics.Bitmap.createBitmap((view.width * scale).toInt().coerceAtLeast(1),
+                (height * scale).toInt().coerceAtLeast(1), android.graphics.Bitmap.Config.RGB_565)
+            val canvas = android.graphics.Canvas(bitmap)
+            canvas.scale(scale, scale)
+            canvas.translate(-view.scrollX.toFloat(), -view.scrollY.toFloat())
+            view.draw(canvas)
+            tab.preview = bitmap
+        }
+    }
+
+    private class ClosedTab(val url: String, val index: Int)
+    private val closedTabs = mutableListOf<ClosedTab>()
+
+    private fun reopenClosedTab() {
+        val closed = closedTabs.removeLastOrNull() ?: return
+        openTab(closed.url, index = closed.index.coerceAtMost(tabs.size))
+        if (tabSwitcher.visibility == View.VISIBLE) renderTabSwitcher()
+    }
+
+    private lateinit var undoBar: LinearLayout
+    private val hideUndoLater = Runnable { hideUndo() }
+
+    /** A short note at the bottom with an undo button, gone by itself after a few seconds. */
+    private fun showUndo(text: String, action: () -> Unit) {
+        if (!::undoBar.isInitialized) {
+            undoBar = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                elevation = dp(12).toFloat()
+                setPadding(dp(18), dp(2), dp(4), dp(2))
+            }
+            root.addView(undoBar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
+        }
+        undoBar.removeAllViews()
+        undoBar.background = roundRect(ColorUtils.setAlphaComponent(theme.surface, 250), dp(16).toFloat(), theme.border)
+        undoBar.addView(TextView(this).apply { this.text = text; textSize = 14f; setTextColor(theme.textPrimary) },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        undoBar.addView(TextView(this).apply {
+            this.text = "GERİ AL"
+            textSize = 14f
+            setTextColor(theme.accent)
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = rippleBackground()
+            setOnClickListener { hideUndo(); action() }
+        })
+        undoBar.layoutParams = (undoBar.layoutParams as FrameLayout.LayoutParams).apply {
+            setMargins(dp(14), 0, dp(14), insetBottom + dp(if (prefs.toolbarBottom && tabSwitcher.visibility != View.VISIBLE) 76 else 16))
+        }
+        undoBar.visibility = View.VISIBLE
+        undoBar.bringToFront()
+        fadeIn(undoBar, dp(16), 200)
+        undoBar.removeCallbacks(hideUndoLater)
+        undoBar.postDelayed(hideUndoLater, 4000)
+    }
+
+    private fun hideUndo() {
+        if (!::undoBar.isInitialized || undoBar.visibility != View.VISIBLE) return
+        undoBar.removeCallbacks(hideUndoLater)
+        undoBar.animate().alpha(0f).setDuration(160).withEndAction { undoBar.visibility = View.GONE; undoBar.alpha = 1f }.start()
+    }
+
+    // ---------------------------------------------------------------- print, data saver
+
+    /** The system print dialog, which also saves the page as a PDF. */
+    private fun printPage(tab: BrowserTab) {
+        val name = tab.title.ifBlank { "Sorune" }
+        runCatching {
+            (getSystemService(PRINT_SERVICE) as android.print.PrintManager)
+                .print(name, tab.webView.createPrintDocumentAdapter(name), android.print.PrintAttributes.Builder().build())
+        }.onFailure { toast("Yazdırma açılamadı") }
+    }
+
+    /** Data saver: web pages load no pictures. Sorune's own pages keep theirs. */
+    private fun applyDataSaver(tab: BrowserTab) {
+        tab.webView.settings.blockNetworkImage = prefs.dataSaver && isWebPage(tab.url)
+    }
+
+    private fun setDataSaver(on: Boolean) {
+        prefs.dataSaver = on
+        tabs.forEach { applyDataSaver(it) }
+        broadcast(settingsState())
+    }
     private fun showProgress(tab: BrowserTab) {
         progress.progress = tab.progress
         progress.visibility = if (tab.progress in 1..99) View.VISIBLE else View.INVISIBLE
@@ -737,6 +909,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showTabSwitcher() {
         clearAddressFocus()
+        active?.let { capturePreview(it) }
         renderTabSwitcher()
         tabSwitcher.visibility = View.VISIBLE
         fadeIn(tabSwitcher, dp(28), 230)
@@ -758,50 +931,77 @@ class MainActivity : AppCompatActivity() {
             .setInterpolator(android.view.animation.DecelerateInterpolator(1.5f)).start()
     }
 
+    /** Tabs two by two, each with a picture of its page. */
     private fun renderTabSwitcher() {
         tabList.removeAllViews()
-        for (tab in tabs) {
-            val card = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(16), dp(12), dp(8), dp(12))
-                background = roundRect(if (tab === active) ColorUtils.setAlphaComponent(theme.accent, 46) else theme.surface, dp(14).toFloat(),
-                    if (tab === active) theme.accent else theme.border)
-                setOnClickListener {
-                    activate(tab)
-                    hideTabSwitcher()
-                }
+        var row: LinearLayout? = null
+        tabs.forEachIndexed { i, tab ->
+            if (i % 2 == 0) {
+                row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                tabList.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    bottomMargin = dp(12)
+                })
             }
-            val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            texts.addView(TextView(this).apply {
-                text = (if (tab.isPrivate) "🕶 " else "") + tab.title.ifEmpty { if (isNewTab(tab.url)) "Yeni sekme" else tab.url }
-                textSize = 15f
-                setTextColor(theme.textPrimary)
-                maxLines = 1
-                ellipsize = TextUtils.TruncateAt.END
-            })
-            texts.addView(TextView(this).apply {
-                text = displayAddress(tab.url).ifEmpty { "Sorune" }
-                textSize = 12f
-                setTextColor(theme.textSecondary)
-                maxLines = 1
-                ellipsize = TextUtils.TruncateAt.MIDDLE
-            })
-            card.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            card.addView(TextView(this).apply {
-                text = "✕"
-                textSize = 18f
-                gravity = Gravity.CENTER
-                setTextColor(theme.textSecondary)
-                contentDescription = getString(R.string.close_tab)
-                setOnClickListener { closeTab(tab) }
-            }, LinearLayout.LayoutParams(dp(44), dp(44)))
-            tabList.addView(card, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                bottomMargin = dp(10)
+            row?.addView(tabCard(tab), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                if (i % 2 == 1) marginStart = dp(12)
             })
         }
+        if (tabs.size % 2 == 1) row?.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f).apply { marginStart = dp(12) })
     }
 
+    private fun tabCard(tab: BrowserTab): View {
+        val current = tab === active
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = roundRect(if (current) ColorUtils.setAlphaComponent(theme.accent, 46) else theme.surface, dp(16).toFloat(),
+                if (current) theme.accent else theme.border, if (current) dp(2) else 1)
+            clipToOutline = true
+            setOnClickListener {
+                activate(tab)
+                hideTabSwitcher()
+            }
+        }
+        val head = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), 0, 0, 0)
+        }
+        val icon = tab.favicon
+        if (icon != null) head.addView(ImageView(this).apply { setImageBitmap(icon) }, LinearLayout.LayoutParams(dp(16), dp(16)))
+        else if (tab.isPrivate) head.addView(TextView(this).apply { text = "🕶"; textSize = 12f })
+        head.addView(TextView(this).apply {
+            text = tab.title.ifEmpty { if (isNewTab(tab.url)) "Yeni sekme" else displayAddress(tab.url).ifEmpty { "Sorune" } }
+            textSize = 13f
+            setTextColor(theme.textPrimary)
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            setPadding(dp(6), 0, 0, 0)
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        head.addView(TextView(this).apply {
+            text = "✕"
+            textSize = 15f
+            gravity = Gravity.CENTER
+            setTextColor(theme.textSecondary)
+            contentDescription = getString(R.string.close_tab)
+            setOnClickListener { closeTab(tab) }
+        }, LinearLayout.LayoutParams(dp(40), dp(40)))
+        card.addView(head)
+        val preview = tab.preview
+        if (preview != null) {
+            card.addView(ImageView(this).apply {
+                setImageBitmap(preview)
+                scaleType = ImageView.ScaleType.CENTER_CROP
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(190)))
+        } else {
+            card.addView(TextView(this).apply {
+                text = if (tab.isPrivate) "🕶" else "🌐"
+                textSize = 34f
+                gravity = Gravity.CENTER
+                setBackgroundColor(ColorUtils.setAlphaComponent(theme.base, 200))
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(190)))
+        }
+        return card
+    }
     // ---------------------------------------------------------------- menu
 
     // ---------------------------------------------------------------- side panel (☰)
@@ -955,6 +1155,8 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
+        if (closedTabs.isNotEmpty()) item("↺", "Kapatılan sekmeyi geri aç") { reopenClosedTab() }
+
         section("Bu sayfa")
         item("⟳", "Yenile", tab != null) { tab?.webView?.reload() }
         item("→", "İleri", tab?.webView?.canGoForward() == true) { tab?.webView?.goForward() }
@@ -969,6 +1171,7 @@ class MainActivity : AppCompatActivity() {
         item("⌕", "Sayfada bul", web) { openFind() }
         item("📖", "Okuma modu", web) { tab?.let { lifecycleScope.launch { openReader(it) } } }
         item("⇪", "Paylaş", tab != null && tab.url.startsWith("http")) { tab?.let { share(it) } }
+        item("🖨", "PDF olarak kaydet / yazdır", web) { tab?.let { printPage(it) } }
         item("⌂", "Ana ekrana ekle", web) { tab?.let { addToHomeScreen(it) } }
         toggle("🖥", "Masaüstü sitesi", "Bu site için hatırlanır", tab?.desktopMode == true, web) { tab?.let { toggleDesktop(it) } }
 
@@ -984,6 +1187,7 @@ class MainActivity : AppCompatActivity() {
 
         section("Koruma")
         toggle("🛡", "Reklam engelleyici", if (adBlockOn) "Bu sayfada ${tab?.blocked?.get() ?: 0} engellendi" else "Kapalı", adBlockOn) { setAdBlock(!adBlockOn) }
+        toggle("🍃", "Veri tasarrufu", "Sayfalardaki resimler yüklenmez", prefs.dataSaver) { setDataSaver(!prefs.dataSaver) }
 
         section("Sorune")
         item("⚙", "Ayarlar ve temalar") { openSettings() }
@@ -1371,6 +1575,12 @@ class MainActivity : AppCompatActivity() {
                 prefs.swipeTabs = message.optBoolean("value", true)
                 broadcast(settingsState())
             }
+            "setHideToolbar" -> {
+                prefs.hideToolbar = message.optBoolean("value", true)
+                if (!prefs.hideToolbar) setToolbarShown(true)
+                broadcast(settingsState())
+            }
+            "setDataSaver" -> setDataSaver(message.optBoolean("value", false))
             "setPullRefresh" -> {
                 prefs.pullRefresh = message.optBoolean("value", false)
                 broadcast(settingsState())
@@ -1472,6 +1682,8 @@ class MainActivity : AppCompatActivity() {
         .put("translateLanguage", prefs.translateLanguage)
         .put("languages", JSONArray(TRANSLATE_LANGUAGES.map { JSONObject().put("id", it).put("name", PageTranslator.languageName(it)) }))
         .put("pullRefresh", prefs.pullRefresh)
+        .put("hideToolbar", prefs.hideToolbar)
+        .put("dataSaver", prefs.dataSaver)
         .put("autoSeconds", prefs.autoScreenSeconds)
         .put("version", BuildConfig.VERSION_NAME)
 
@@ -1602,6 +1814,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun openFind() {
         val tab = active ?: return
+        setToolbarShown(true)
         tab.webView.setFindListener { ordinal, matches, _ ->
             findCount.text = if (findInput.text.isEmpty()) "" else if (matches == 0) "0/0" else "${ordinal + 1}/$matches"
         }
