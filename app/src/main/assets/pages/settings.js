@@ -37,7 +37,7 @@ function renderSettings(state) {
 
     renderNewTab(state);
     for (const button of $("tabs-place").querySelectorAll("button"))
-        button.setAttribute("aria-checked", String((button.dataset.value === "menu") === Boolean(state.tabsInMenu)));
+        button.setAttribute("aria-checked", String(button.dataset.value === (state.tabsPlace || "bar")));
     for (const button of $("toolbar-position").querySelectorAll("button"))
         button.setAttribute("aria-checked", String((button.dataset.value === "bottom") === Boolean(state.toolbarBottom)));
     if (!draggingZoom) $("text-zoom").value = state.textZoom || 100;
@@ -147,7 +147,7 @@ $("text-zoom").addEventListener("input", () => { draggingZoom = true; $("text-zo
 $("text-zoom").addEventListener("change", () => { draggingZoom = false; send({ type: "setTextZoom", value: Number($("text-zoom").value) }); });
 $("tabs-place").addEventListener("click", (event) => {
     const button = event.target.closest("button");
-    if (button) send({ type: "setTabsInMenu", value: button.dataset.value === "menu" });
+    if (button) send({ type: "setTabsPlace", value: button.dataset.value });
 });
 
 $("toolbar-position").addEventListener("click", (event) => {

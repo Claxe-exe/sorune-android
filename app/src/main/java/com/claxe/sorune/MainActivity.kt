@@ -220,13 +220,8 @@ class MainActivity : AppCompatActivity() {
 
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime())
-            // Gesture navigation (no tappable buttons at the bottom): the page runs under the thin
-            // gesture bar instead of leaving an empty strip. The keyboard and a bottom toolbar still push up.
-            val gestureNav = insets.getInsets(WindowInsetsCompat.Type.tappableElement()).bottom == 0
-            val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
-            val bottom = if (gestureNav && ime == 0 && !prefs.toolbarBottom) 0 else bars.bottom
-            frame.setPadding(bars.left, bars.top, bars.right, bottom)
-            if (::theme.isInitialized) window.navigationBarColor = if (gestureNav) Color.TRANSPARENT else theme.base
+            lastInsets = insets
+            applyFramePadding()
             insetTop = bars.top
             insetBottom = bars.bottom
             tabSwitcher.setPadding(bars.left, bars.top, bars.right, bars.bottom)
@@ -242,7 +237,7 @@ class MainActivity : AppCompatActivity() {
         createDrawer()
         applyToolbarPosition()
         setupAddressBar()
-        tabsButton.setOnClickListener { showTabSwitcher() }
+        tabsButton.setOnClickListener { if (prefs.tabsPlace == "swap") showQuickMenu() else showTabSwitcher() }
         menuButton.setOnClickListener { if (drawerOpen) closeDrawer() else openDrawer() }
         findViewById<TextView>(R.id.newTabButton).setOnClickListener {
             hideTabSwitcher()
@@ -414,7 +409,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateTabsButton() {
         tabsButton.text = if (tabs.size > 99) ":)" else tabs.size.toString()
-        tabsButton.visibility = if (prefs.tabsInMenu) View.GONE else View.VISIBLE
+        tabsButton.visibility = if (prefs.tabsPlace == "menu") View.GONE else View.VISIBLE
+        if (prefs.tabsPlace == "swap") tabsButton.text = "⊞"
     }
 
     private fun goBack() {
@@ -620,6 +616,26 @@ class MainActivity : AppCompatActivity() {
 
     private fun showAddress(tab: BrowserTab) {
         if (!address.hasFocus()) address.setText(displayAddress(tab.url))
+        applyFramePadding()
+    }
+
+    private var lastInsets: WindowInsetsCompat? = null
+
+    /**
+     * No empty strip above the navigation bar: Sorune's own pages always run under it (they leave
+     * room themselves), web pages do with gesture navigation. The keyboard and a bottom toolbar still push up.
+     */
+    private fun applyFramePadding() {
+        val insets = lastInsets ?: return
+        val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime())
+        val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
+        // Some phones report the gesture bar as tappable; its small height gives it away.
+        val gestureNav = insets.getInsets(WindowInsetsCompat.Type.tappableElement()).bottom == 0 || nav < dp(44)
+        val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+        val ownPage = active?.let { !isWebPage(it.url) } ?: true
+        val bottom = if (ime > 0 || prefs.toolbarBottom || !(gestureNav || ownPage)) bars.bottom else 0
+        if (frame.paddingBottom != bottom || frame.paddingTop != bars.top) frame.setPadding(bars.left, bars.top, bars.right, bottom)
+        if (::theme.isInitialized) window.navigationBarColor = if (gestureNav) Color.TRANSPARENT else theme.base
     }
 
     private fun showProgress(tab: BrowserTab) {
@@ -871,19 +887,19 @@ class MainActivity : AppCompatActivity() {
             addView(TextView(this@MainActivity).apply { text = label; textSize = 11f; gravity = Gravity.CENTER; setTextColor(theme.textSecondary); maxLines = 1 })
             setOnClickListener { closeDrawer(action) }
         }
-        val quickItems = mutableListOf<Triple<String, String, () -> Unit>>()
-        if (prefs.tabsInMenu) quickItems += Triple("▣ ${tabs.size}", "Sekmeler") { showTabSwitcher() }
-        quickItems += Triple("＋", "Yeni") { openTab(NEW_TAB); Unit }
-        if (privateSupported) quickItems += Triple("🕶", "Gizli") { openTab(NEW_TAB, isPrivate = true); Unit }
-        quickItems += Triple("🕘", "Geçmiş") { openLibrary("gecmis") }
-        quickItems += Triple("★", "Yer imleri") { openLibrary("yer-imleri") }
-        quickItems += Triple("⬇", "İndirilen") { openLibrary("indirmeler") }
-        quickItems.forEachIndexed { i, (icon, label, action) ->
-            quick.addView(quickButton(icon, label, action), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                if (i > 0) marginStart = dp(6)
-            })
+        if (prefs.tabsPlace == "swap") {
+            box.addView(tabStrip())
+        } else {
+            val quickItems = mutableListOf<Triple<String, String, () -> Unit>>()
+            if (prefs.tabsPlace == "menu") quickItems += Triple("▣ ${tabs.size}", "Sekmeler") { showTabSwitcher() }
+            quickItems += quickActions()
+            quickItems.forEachIndexed { i, (icon, label, action) ->
+                quick.addView(quickButton(icon, label, action), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    if (i > 0) marginStart = dp(6)
+                })
+            }
+            box.addView(quick)
         }
-        box.addView(quick)
 
         fun section(title: String) = box.addView(TextView(this).apply {
             text = title.uppercase()
@@ -967,6 +983,69 @@ class MainActivity : AppCompatActivity() {
         section("Sorune")
         item("⚙", "Ayarlar ve temalar") { openSettings() }
         item("⭳", "Güncellemeleri denetle") { checkForUpdates(manual = true) }
+    }
+
+    private fun quickActions(): List<Triple<String, String, () -> Unit>> {
+        val items = mutableListOf<Triple<String, String, () -> Unit>>(Triple("＋", "Yeni") { openTab(NEW_TAB); Unit })
+        if (privateSupported) items += Triple("🕶", "Gizli") { openTab(NEW_TAB, isPrivate = true); Unit }
+        items += Triple("🕘", "Geçmiş") { openLibrary("gecmis") }
+        items += Triple("★", "Yer imleri") { openLibrary("yer-imleri") }
+        items += Triple("⬇", "İndirilen") { openLibrary("indirmeler") }
+        return items
+    }
+
+    /** "Swap" layout: the ⊞ button in the address bar opens the quick actions as a small menu. */
+    private fun showQuickMenu() {
+        clearAddressFocus()
+        val items = quickActions()
+        val menu = PopupMenu(this, tabsButton)
+        items.forEachIndexed { i, (icon, label, _) -> menu.menu.add(0, i, i, "$icon  ${if (label == "Yeni") "Yeni sekme" else if (label == "Gizli") "Yeni gizli sekme" else label}") }
+        menu.setOnMenuItemClickListener { items[it.itemId].third(); true }
+        menu.show()
+    }
+
+    /** "Swap" layout: open tabs side by side at the top of the panel, the current one framed. */
+    private fun tabStrip(): View {
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        for (tab in tabs) {
+            val current = tab === active
+            row.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(10), dp(10), dp(10), dp(10))
+                background = roundRect(ColorUtils.setAlphaComponent(theme.base, 200), dp(14).toFloat(),
+                    if (current) theme.accent else theme.border, if (current) dp(2) else 1)
+                foreground = rippleBackground()
+                val icon = tab.favicon
+                if (icon != null) addView(ImageView(this@MainActivity).apply { setImageBitmap(icon) }, LinearLayout.LayoutParams(dp(18), dp(18)))
+                else addView(TextView(this@MainActivity).apply { text = if (tab.isPrivate) "🕶" else "🌐"; textSize = 14f })
+                addView(TextView(this@MainActivity).apply {
+                    text = tab.title.ifBlank { displayAddress(tab.url).ifBlank { "Yeni sekme" } }
+                    textSize = 13f
+                    setTextColor(if (current) theme.textPrimary else theme.textSecondary)
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                    setPadding(dp(8), 0, 0, 0)
+                }, LinearLayout.LayoutParams(dp(96), ViewGroup.LayoutParams.WRAP_CONTENT))
+                setOnClickListener { closeDrawer { activate(tab) } }
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(6) })
+        }
+        row.addView(TextView(this).apply {
+            text = "▣ ${tabs.size}\nTümü"
+            textSize = 11f
+            gravity = Gravity.CENTER
+            setTextColor(theme.textSecondary)
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            background = roundRect(ColorUtils.setAlphaComponent(theme.base, 200), dp(14).toFloat(), theme.border)
+            foreground = rippleBackground()
+            setOnClickListener { closeDrawer { showTabSwitcher() } }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        return android.widget.HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(row)
+            // Keep the current tab in view.
+            post { tabs.indexOf(active).takeIf { it >= 0 }?.let { scrollTo(row.getChildAt(it).left - dp(20), 0) } }
+        }
     }
 
     private fun roundRectCorners(fill: Int, radius: Float) = GradientDrawable().apply {
@@ -1318,8 +1397,8 @@ class MainActivity : AppCompatActivity() {
                 CustomThemes.delete(this, id)
                 applyTheme()
             }
-            "setTabsInMenu" -> {
-                prefs.tabsInMenu = message.optBoolean("value", false)
+            "setTabsPlace" -> {
+                prefs.tabsPlace = message.optString("value").takeIf { it in setOf("bar", "menu", "swap") } ?: "bar"
                 updateTabsButton()
                 broadcast(settingsState())
             }
@@ -1384,7 +1463,7 @@ class MainActivity : AppCompatActivity() {
         .put("pip", prefs.pictureInPicture)
         .put("newtab", runCatching { JSONObject(prefs.newTab) }.getOrDefault(JSONObject()))
         .put("swipeTabs", prefs.swipeTabs)
-        .put("tabsInMenu", prefs.tabsInMenu)
+        .put("tabsPlace", prefs.tabsPlace)
         .put("translateLanguage", prefs.translateLanguage)
         .put("languages", JSONArray(TRANSLATE_LANGUAGES.map { JSONObject().put("id", it).put("name", PageTranslator.languageName(it)) }))
         .put("pullRefresh", prefs.pullRefresh)
