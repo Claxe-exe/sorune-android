@@ -136,12 +136,14 @@ function renderNewTab(state) {
     $("data-saver").onclick = () => send({ type: "setDataSaver", value: !state.dataSaver });
     $("private-lock").setAttribute("aria-checked", String(Boolean(state.privateLock)));
     $("private-lock").onclick = () => send({ type: "setPrivateLock", value: !state.privateLock });
+    $("secure-dns").setAttribute("aria-checked", String(Boolean(state.secureDns)));
+    $("secure-dns").onclick = () => send({ type: "setSecureDns", value: !state.secureDns });
     const dns = state.privateDns || {};
     $("dns-state").textContent = dns.active && dns.server
-        ? `Özel DNS açık (${dns.server}): DNS engelleri aşılıyor.`
+        ? `Telefonda Özel DNS açık (${dns.server}).`
         : dns.active
-            ? "Özel DNS otomatikte: operatörün DNS'i kullanılıyor, engeller kalır."
-            : "Özel DNS kapalı: operatörün DNS'i kullanılıyor, engeller kalır.";
+            ? "Telefonda Özel DNS otomatikte (operatörün DNS'i)."
+            : "Telefonda Özel DNS kapalı.";
 }
 
 $("hour12").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setNewTab("hour12", b.dataset.value === "12"); });

@@ -239,6 +239,7 @@ class MainActivity : AppCompatActivity() {
 
         wallpaper.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> fitWallpaper() }
         adBlockOn = prefs.adBlock
+        if (prefs.secureDns) applySecureDns()
         // A private session left over from last time (Sorune closed with private tabs open) is wiped.
         deletePrivateProfile()
         createTranslationChip()
@@ -316,8 +317,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
-        // Leaving Sorune locks private tabs again (not while the lock prompt itself covers it).
-        if (!authRunning) privateUnlocked = false
+        // Private tabs are one-time: leaving Sorune closes them. Not while Sorune itself sent the
+        // person away (the lock's PIN screen, picking a file to upload) or the screen only turned.
+        if (authRunning || fileCallback != null || isChangingConfigurations) return
+        privateUnlocked = false
+        closePrivateTabs()
     }
 
     override fun onResume() {
@@ -343,7 +347,11 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun createTab(isPrivate: Boolean = false): BrowserTab {
-        if (isPrivate) ProfileStore.getInstance().getOrCreateProfile(PRIVATE_PROFILE)
+        if (isPrivate) {
+            // The first private tab starts clean: anything an earlier session left is wiped first.
+            if (tabs.none { it.isPrivate }) deletePrivateProfile()
+            ProfileStore.getInstance().getOrCreateProfile(PRIVATE_PROFILE)
+        }
         val tab = BrowserTab(isPrivate)
         val view = tab.webView
         view.settings.apply {
@@ -911,6 +919,23 @@ class MainActivity : AppCompatActivity() {
         return state
     }
 
+    /** Secure DNS for Sorune alone: every HTTPS connection of every tab goes through [SecureDns]. */
+    private fun applySecureDns() {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) {
+            toast("Bu telefondaki WebView sürümü bunu desteklemiyor")
+            return
+        }
+        val executor = ContextCompat.getMainExecutor(this)
+        if (prefs.secureDns) {
+            val port = runCatching { SecureDns.start() }.getOrNull() ?: return
+            androidx.webkit.ProxyController.getInstance().setProxyOverride(
+                androidx.webkit.ProxyConfig.Builder().addProxyRule("127.0.0.1:$port", androidx.webkit.ProxyConfig.MATCH_HTTPS).build(),
+                executor) {}
+        } else {
+            androidx.webkit.ProxyController.getInstance().clearProxyOverride(executor) { SecureDns.stop() }
+        }
+    }
+
     /** No app may change private DNS itself: the address goes to the clipboard and the system settings open. */
     private fun openPrivateDnsSettings() {
         val clipboard = getSystemService(android.content.ClipboardManager::class.java)
@@ -1057,11 +1082,43 @@ class MainActivity : AppCompatActivity() {
             .setInterpolator(android.view.animation.DecelerateInterpolator(1.5f)).start()
     }
 
-    /** Tabs two by two, each with a picture of its page. */
+    /** Tabs two by two, each with a picture of its page; private tabs in their own group below. */
     private fun renderTabSwitcher() {
         tabList.removeAllViews()
+        addTabGrid(tabs.filter { !it.isPrivate })
+        val privateTabs = tabs.filter { it.isPrivate }
+        if (privateTabs.isEmpty()) return
+        tabList.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(8), 0, 0)
+            addView(TextView(this@MainActivity).apply {
+                text = "🕶 Gizli sekmeler"
+                textSize = 16f
+                setTextColor(theme.textPrimary)
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(TextView(this@MainActivity).apply {
+                text = "Hepsini kapat"
+                textSize = 13f
+                setTextColor(theme.accent)
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                background = rippleBackground()
+                setOnClickListener { closePrivateTabs() }
+            })
+        })
+        tabList.addView(TextView(this).apply {
+            text = "Sorune'den çıkınca kapanır, hiçbir şey kaydedilmez."
+            textSize = 12f
+            setTextColor(theme.textSecondary)
+            setPadding(dp(4), 0, 0, dp(10))
+        })
+        addTabGrid(privateTabs)
+    }
+
+    private fun addTabGrid(list: List<BrowserTab>) {
         var row: LinearLayout? = null
-        tabs.forEachIndexed { i, tab ->
+        list.forEachIndexed { i, tab ->
             if (i % 2 == 0) {
                 row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
                 tabList.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
@@ -1072,7 +1129,7 @@ class MainActivity : AppCompatActivity() {
                 if (i % 2 == 1) marginStart = dp(12)
             })
         }
-        if (tabs.size % 2 == 1) row?.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f).apply { marginStart = dp(12) })
+        if (list.size % 2 == 1) row?.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f).apply { marginStart = dp(12) })
     }
 
     private fun tabCard(tab: BrowserTab): View {
@@ -1342,13 +1399,14 @@ class MainActivity : AppCompatActivity() {
     /** "Swap" layout: open tabs side by side at the top of the panel, the current one framed. */
     private fun tabStrip(): View {
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        for (tab in tabs) {
+        val ordered = tabs.filter { !it.isPrivate } + tabs.filter { it.isPrivate }
+        for (tab in ordered) {
             val current = tab === active
             row.addView(LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(10), dp(10), dp(10), dp(10))
-                background = roundRect(ColorUtils.setAlphaComponent(theme.base, 200), dp(14).toFloat(),
+                background = roundRect(if (tab.isPrivate) Color.argb(235, 8, 8, 10) else ColorUtils.setAlphaComponent(theme.base, 200), dp(14).toFloat(),
                     if (current) theme.accent else theme.border, if (current) dp(2) else 1)
                 foreground = rippleBackground()
                 val icon = tab.favicon.takeUnless { tab.isPrivate && privateLocked() }
@@ -1379,7 +1437,7 @@ class MainActivity : AppCompatActivity() {
             isHorizontalScrollBarEnabled = false
             addView(row)
             // Keep the current tab in view.
-            post { tabs.indexOf(active).takeIf { it >= 0 }?.let { scrollTo(row.getChildAt(it).left - dp(20), 0) } }
+            post { ordered.indexOf(active).takeIf { it >= 0 }?.let { scrollTo(row.getChildAt(it).left - dp(20), 0) } }
         }
     }
 
@@ -1431,9 +1489,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun switchTab(step: Int) {
-        val index = tabs.indexOf(active)
-        if (index < 0 || tabs.size < 2) return
-        val target = tabs[(index + step).mod(tabs.size)]
+        // Normal and private tabs never mix: a swipe stays on its own side.
+        val group = tabs.filter { it.isPrivate == active?.isPrivate }
+        val index = group.indexOf(active)
+        if (index < 0 || group.size < 2) return
+        val target = group[(index + step).mod(group.size)]
         activate(target)
         content.translationX = step * dp(40).toFloat()
         content.alpha = 0.4f
@@ -1709,6 +1769,11 @@ class MainActivity : AppCompatActivity() {
             "setDataSaver" -> setDataSaver(message.optBoolean("value", false))
             "setPrivateLock" -> setPrivateLock(message.optBoolean("value", false))
             "dns:open" -> openPrivateDnsSettings()
+            "setSecureDns" -> {
+                prefs.secureDns = message.optBoolean("value", false)
+                applySecureDns()
+                broadcast(settingsState())
+            }
             "setPullRefresh" -> {
                 prefs.pullRefresh = message.optBoolean("value", false)
                 broadcast(settingsState())
@@ -1813,11 +1878,31 @@ class MainActivity : AppCompatActivity() {
         .put("hideToolbar", prefs.hideToolbar)
         .put("dataSaver", prefs.dataSaver)
         .put("privateLock", prefs.privateLock)
+        .put("secureDns", prefs.secureDns)
         .put("privateDns", privateDnsState())
         .put("autoSeconds", prefs.autoScreenSeconds)
         .put("version", BuildConfig.VERSION_NAME)
 
     // ---------------------------------------------------------------- private tabs, dark sites
+
+    /** Closes every private tab and wipes what they left behind (cookies, storage, cache). */
+    private fun closePrivateTabs() {
+        val privateTabs = tabs.filter { it.isPrivate }
+        if (privateTabs.isEmpty()) return
+        val wasActive = active?.isPrivate == true
+        for (tab in privateTabs) {
+            tabs.remove(tab)
+            readerArticles.remove(tab.id)
+            content.removeView(tab.webView)
+            tab.webView.destroy()
+        }
+        deletePrivateProfile()
+        // The pages close a moment after destroy(); try again once they surely have.
+        content.postDelayed({ if (tabs.none { it.isPrivate }) deletePrivateProfile() }, 1500)
+        if (tabs.isEmpty()) openTab(NEW_TAB) else if (wasActive) activate(tabs.last())
+        updateTabsButton()
+        if (tabSwitcher.visibility == View.VISIBLE) renderTabSwitcher()
+    }
 
     private fun deletePrivateProfile() {
         if (!privateSupported) return

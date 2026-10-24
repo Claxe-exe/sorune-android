@@ -19,8 +19,8 @@ android {
         // Android 10+: downloads go to the shared Downloads folder without a storage permission.
         minSdk = 29
         targetSdk = 36
-        versionCode = 701
-        versionName = "0.7.1"
+        versionCode = 702
+        versionName = "0.7.2"
         // Where the app looks for its own updates (GitHub releases of this repository).
         buildConfigField("String", "UPDATE_REPO", "\"Claxe-exe/sorune-android\"")
     }

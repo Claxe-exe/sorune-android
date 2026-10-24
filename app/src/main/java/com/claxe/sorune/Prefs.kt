@@ -74,6 +74,10 @@ class Prefs(context: Context) {
         get() = store.getBoolean("hideToolbar", true)
         set(value) = store.edit().putBoolean("hideToolbar", value).apply()
 
+    var secureDns: Boolean
+        get() = store.getBoolean("secureDns", false)
+        set(value) = store.edit().putBoolean("secureDns", value).apply()
+
     var privateLock: Boolean
         get() = store.getBoolean("privateLock", false)
         set(value) = store.edit().putBoolean("privateLock", value).apply()
