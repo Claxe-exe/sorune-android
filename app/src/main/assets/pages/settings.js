@@ -134,6 +134,8 @@ function renderNewTab(state) {
     $("hide-toolbar").onclick = () => send({ type: "setHideToolbar", value: !state.hideToolbar });
     $("data-saver").setAttribute("aria-checked", String(Boolean(state.dataSaver)));
     $("data-saver").onclick = () => send({ type: "setDataSaver", value: !state.dataSaver });
+    $("mascot").setAttribute("aria-checked", String(Boolean(state.mascot)));
+    $("mascot").onclick = () => send({ type: "setMascot", value: !state.mascot });
     $("private-lock").setAttribute("aria-checked", String(Boolean(state.privateLock)));
     $("private-lock").onclick = () => send({ type: "setPrivateLock", value: !state.privateLock });
     $("secure-dns").setAttribute("aria-checked", String(Boolean(state.secureDns)));
@@ -177,6 +179,7 @@ let draggingZoom = false;
 $("text-zoom").addEventListener("input", () => { draggingZoom = true; $("text-zoom-label").textContent = `Yazı boyutu %${$("text-zoom").value}`; });
 $("text-zoom").addEventListener("change", () => { draggingZoom = false; send({ type: "setTextZoom", value: Number($("text-zoom").value) }); });
 $("dns-open").addEventListener("click", () => send({ type: "dns:open" }));
+$("backup-import").addEventListener("click", () => send({ type: "backup:import" }));
 
 $("tabs-place").addEventListener("click", (event) => {
     const button = event.target.closest("button");

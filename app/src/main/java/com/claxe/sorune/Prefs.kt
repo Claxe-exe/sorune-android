@@ -109,12 +109,28 @@ class Prefs(context: Context) {
         get() = store.getLong("updateCheck", 0)
         set(value) = store.edit().putLong("updateCheck", value).apply()
 
-    fun saveSession(urls: List<String>, active: Int) {
+    fun saveSession(urls: List<String>, active: Int, groups: List<String>) {
         store.edit()
             .putString("session", JSONArray(urls).toString())
+            .putString("sessionGroups", JSONArray(groups).toString())
             .putInt("sessionActive", active)
             .apply()
     }
+
+    /** Each saved tab's group ("" = none), in the same order as [loadSession]. */
+    fun loadSessionGroups(): List<String> = runCatching {
+        val array = JSONArray(store.getString("sessionGroups", "[]"))
+        List(array.length()) { array.getString(it) }
+    }.getOrDefault(emptyList())
+
+    var mascot: Boolean
+        get() = store.getBoolean("mascot", true)
+        set(value) = store.edit().putBoolean("mascot", value).apply()
+
+    /** Auto scroll speed step (0 = slowest). */
+    var autoScrollSpeed: Int
+        get() = store.getInt("autoScrollSpeed", 2)
+        set(value) = store.edit().putInt("autoScrollSpeed", value).apply()
 
     fun loadSession(): Pair<List<String>, Int> {
         val urls = runCatching {

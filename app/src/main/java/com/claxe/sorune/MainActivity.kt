@@ -105,6 +105,8 @@ class MainActivity : AppCompatActivity() {
         var favicon: android.graphics.Bitmap? = null
         /** A small picture of the page for the tab overview, taken when the tab is left. */
         var preview: android.graphics.Bitmap? = null
+        /** Tab group name; null = in no group. */
+        var group: String? = null
         /** Answers Sorune's own pages (new tab, settings) on the page's message channel. */
         var reply: JavaScriptReplyProxy? = null
         /** Page translation: on while set; stays on for the tab's next pages, like Chrome. */
@@ -249,6 +251,7 @@ class MainActivity : AppCompatActivity() {
         createTranslationChip()
         createFindBar()
         createDrawer()
+        updateMascot()
         applyToolbarPosition()
         setupAddressBar()
         tabsButton.setOnClickListener { if (prefs.tabsPlace == "swap") showQuickMenu() else showTabSwitcher() }
@@ -301,7 +304,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun restoreTabs(intent: Intent?) {
         val (urls, activeIndex) = prefs.loadSession()
-        urls.forEach { openTab(it, activate = false) }
+        val groups = prefs.loadSessionGroups()
+        urls.forEachIndexed { i, url -> openTab(url, activate = false).group = groups.getOrNull(i)?.ifEmpty { null } }
         if (tabs.isNotEmpty())
             activate(tabs[activeIndex.coerceIn(0, tabs.lastIndex)])
         val link = linkFrom(intent)
@@ -313,7 +317,7 @@ class MainActivity : AppCompatActivity() {
         super.onPause()
         // Private tabs are never saved.
         val saved = tabs.filter { !it.isPrivate && it.url.isNotEmpty() }
-        prefs.saveSession(saved.map { it.url }, saved.indexOf(active).coerceAtLeast(0))
+        prefs.saveSession(saved.map { it.url }, saved.indexOf(active).coerceAtLeast(0), saved.map { it.group.orEmpty() })
         saveLibrary()
         CookieManager.getInstance().flush()
         active?.webView?.onPause()
@@ -425,6 +429,7 @@ class MainActivity : AppCompatActivity() {
         if (changed) fadeIn(tab.webView, 0, 200)
         setToolbarShown(true)
         updatePrivateLock()
+        if (autoScrollTab != null && autoScrollTab !== tab) stopAutoScroll()
         tab.webView.onResume()
         showAddress(tab)
         showProgress(tab)
@@ -437,6 +442,7 @@ class MainActivity : AppCompatActivity() {
     private fun closeTab(tab: BrowserTab) {
         val index = tabs.indexOf(tab)
         if (index < 0) return
+        if (tab === autoScrollTab) stopAutoScroll()
         if (!tab.isPrivate && isWebPage(tab.url)) {
             closedTabs += ClosedTab(tab.url, index)
             if (closedTabs.size > 15) closedTabs.removeAt(0)
@@ -528,6 +534,8 @@ class MainActivity : AppCompatActivity() {
 
         override fun onPageFinished(view: WebView, url: String) {
             if (tab === active) refresh.isRefreshing = false
+            if (tab === active && isWebPage(url)) mascotHappy()
+            if (tab === autoScrollTab) injectAutoScroll(tab)
             // The next page of a translated tab is translated too.
             if (tab.translateTarget != null && isWebPage(url)) lifecycleScope.launch {
                 delay(500)
@@ -558,6 +566,7 @@ class MainActivity : AppCompatActivity() {
                 return false
             }
             val child = openTab(null, index = tabs.indexOf(tab) + 1, isPrivate = tab.isPrivate)
+            child.group = tab.group
             (resultMsg.obj as WebView.WebViewTransport).webView = child.webView
             resultMsg.sendToTarget()
             return true
@@ -699,6 +708,7 @@ class MainActivity : AppCompatActivity() {
         gestureNav = insets.getInsets(WindowInsetsCompat.Type.tappableElement()).bottom == 0 || nav < dp(44)
         // Some phones report a leftover keyboard height while it is closed: ask whether it is shown.
         val keyboard = insets.isVisible(WindowInsetsCompat.Type.ime())
+        keyboardShown = keyboard
         val ownPage = active?.let { !isWebPage(it.url) } ?: true
         toolbarInsetTop = if (prefs.toolbarBottom) 0 else sys.top
         toolbarInsetBottom = if (prefs.toolbarBottom && !keyboard) sys.bottom else 0
@@ -712,6 +722,7 @@ class MainActivity : AppCompatActivity() {
         toolbar.setPadding(toolbar.paddingLeft, toolbarInsetTop, toolbar.paddingRight, toolbarInsetBottom)
         if (toolbarAnimator?.isRunning != true) setToolbarHeight(toolbarTargetHeight())
         if (::theme.isInitialized) window.navigationBarColor = if (gestureNav) Color.TRANSPARENT else theme.base
+        updateMascot()
     }
 
     // ---------------------------------------------------------------- toolbar hides while scrolling
@@ -733,6 +744,7 @@ class MainActivity : AppCompatActivity() {
         if (toolbar.layoutParams.height == height) return
         toolbar.layoutParams.height = height
         toolbar.requestLayout()
+        positionFloating()
     }
 
     private fun setToolbarShown(show: Boolean) {
@@ -990,6 +1002,323 @@ class MainActivity : AppCompatActivity() {
         if (!opened) runCatching { startActivity(Intent(android.provider.Settings.ACTION_SETTINGS)) }
     }
 
+    // ---------------------------------------------------------------- mascot
+
+    private var mascot: MascotView? = null
+    private var keyboardShown = false
+    private val mascotSleep = Runnable { mascot?.show(MascotView.Mood.Sleepy) }
+    private val mascotCalm = Runnable { mascot?.show(MascotView.Mood.Neutral) }
+
+    /** She sits just above the toolbar when it is at the bottom, otherwise on the bottom edge. */
+    private fun updateMascot() {
+        if (!prefs.mascot) {
+            mascot?.let { root.removeView(it) }
+            mascot = null
+            return
+        }
+        val view = mascot ?: MascotView(this).also {
+            mascot = it
+            // Above the pages, below the tab overview, fullscreen video and the side panel.
+            root.addView(it, root.indexOfChild(frame) + 1, FrameLayout.LayoutParams(dp(84), dp(46), Gravity.BOTTOM or Gravity.END))
+            it.post { it.peekIn() }
+            mascotAwake()
+        }
+        positionFloating()
+        view.visibility = if (customView == null && !keyboardShown) View.VISIBLE else View.GONE
+    }
+
+    /** The mascot and the auto scroll controls follow the toolbar's top edge (or the screen's bottom). */
+    private fun positionFloating() {
+        val edge = if (prefs.toolbarBottom) toolbar.layoutParams.height.coerceAtLeast(0) else 0
+        mascot?.let { view ->
+            val params = view.layoutParams as FrameLayout.LayoutParams
+            if (params.bottomMargin != edge || params.marginEnd != dp(64)) {
+                params.bottomMargin = edge
+                params.marginEnd = dp(64)
+                view.layoutParams = params
+            }
+        }
+        autoScrollBar?.let { bar ->
+            val params = bar.layoutParams as FrameLayout.LayoutParams
+            val margin = edge + dp(if (prefs.toolbarBottom) 10 else 20) + if (prefs.toolbarBottom) 0 else insetBottom
+            if (params.bottomMargin != margin) {
+                params.bottomMargin = margin
+                bar.layoutParams = params
+            }
+        }
+    }
+
+    /** Any touch wakes her; a minute of nothing and she dozes off. */
+    private fun mascotAwake() {
+        val view = mascot ?: return
+        if (view.mood == MascotView.Mood.Sleepy) view.show(MascotView.Mood.Neutral)
+        root.removeCallbacks(mascotSleep)
+        root.postDelayed(mascotSleep, 60_000)
+    }
+
+    private fun mascotHappy() {
+        val view = mascot ?: return
+        mascotAwake()
+        view.show(MascotView.Mood.Happy)
+        root.removeCallbacks(mascotCalm)
+        root.postDelayed(mascotCalm, 2500)
+    }
+
+    override fun dispatchTouchEvent(event: android.view.MotionEvent): Boolean {
+        if (event.actionMasked == android.view.MotionEvent.ACTION_DOWN) mascotAwake()
+        return super.dispatchTouchEvent(event)
+    }
+
+    // ---------------------------------------------------------------- auto scroll
+
+    private val scrollSpeeds = intArrayOf(25, 45, 70, 100, 140, 200, 280)
+    private var autoScrollTab: BrowserTab? = null
+    private var autoScrollPaused = false
+    private var autoScrollBar: LinearLayout? = null
+
+    /**
+     * Scrolls the page (or the box it reads in, for readers that scroll inside) a little every
+     * frame. A finger on the page holds it; it carries on a moment after the finger lifts.
+     */
+    private val autoScrollScript = """
+        (() => {
+            const old = window.__soruneScroll;
+            if (old) { old.speed = SPEED; old.paused = PAUSED; return; }
+            const state = { speed: SPEED, paused: PAUSED, held: false, until: 0 };
+            window.__soruneScroll = state;
+            let last = 0, carry = 0, box = null;
+            const scrollable = (el) => /(auto|scroll)/.test(getComputedStyle(el).overflowY) && el.scrollHeight > el.clientHeight + 40;
+            const target = () => {
+                const page = document.scrollingElement || document.documentElement;
+                if (page.scrollHeight > innerHeight + 40) return page;
+                if (box && box.isConnected) return box;
+                for (const el of document.elementsFromPoint(innerWidth / 2, innerHeight / 2))
+                    for (let e = el; e && e !== document.body; e = e.parentElement) if (scrollable(e)) return (box = e);
+                return page;
+            };
+            addEventListener("touchstart", () => { state.held = true; }, { capture: true, passive: true });
+            addEventListener("touchend", () => { state.held = false; state.until = performance.now() + 1500; }, { capture: true, passive: true });
+            const frame = (time) => {
+                if (window.__soruneScroll !== state) return;
+                if (last && !state.paused && !state.held && time > state.until) {
+                    carry += state.speed * Math.min(time - last, 100) / 1000;
+                    const step = Math.floor(carry);
+                    if (step >= 1) { carry -= step; target().scrollBy(0, step); }
+                }
+                last = time;
+                requestAnimationFrame(frame);
+            };
+            requestAnimationFrame(frame);
+        })();
+    """.trimIndent()
+
+    private fun startAutoScroll(tab: BrowserTab) {
+        autoScrollTab = tab
+        autoScrollPaused = false
+        injectAutoScroll(tab)
+        showAutoScrollBar()
+    }
+
+    private fun injectAutoScroll(tab: BrowserTab) {
+        val speed = scrollSpeeds[prefs.autoScrollSpeed.coerceIn(0, scrollSpeeds.lastIndex)]
+        tab.webView.evaluateJavascript(autoScrollScript.replace("SPEED", speed.toString()).replace("PAUSED", autoScrollPaused.toString()), null)
+    }
+
+    private fun stopAutoScroll() {
+        autoScrollTab?.webView?.evaluateJavascript("window.__soruneScroll = null;", null)
+        autoScrollTab = null
+        autoScrollBar?.let { bar -> bar.animate().alpha(0f).setDuration(150).withEndAction { bar.visibility = View.GONE; bar.alpha = 1f }.start() }
+    }
+
+    /** A small pill above the toolbar: slower, pause, faster, stop. */
+    private fun showAutoScrollBar() {
+        val bar = autoScrollBar ?: LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            elevation = dp(10).toFloat()
+            setPadding(dp(4), 0, dp(4), 0)
+            root.addView(this, root.indexOfChild(frame) + 1, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44), Gravity.BOTTOM or Gravity.START).apply {
+                marginStart = dp(14)
+            })
+        }.also { autoScrollBar = it }
+        bar.removeAllViews()
+        bar.background = roundRect(ColorUtils.setAlphaComponent(theme.surface, 240), dp(22).toFloat(), theme.accent, dp(1))
+        fun button(text: String, description: String, action: () -> Unit) = bar.addView(TextView(this).apply {
+            this.text = text
+            textSize = 17f
+            gravity = Gravity.CENTER
+            setTextColor(theme.textPrimary)
+            contentDescription = description
+            background = rippleBackground()
+            setOnClickListener { action() }
+        }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        button("−", "Yavaşlat") { changeAutoScrollSpeed(-1) }
+        button(if (autoScrollPaused) "▶" else "⏸", if (autoScrollPaused) "Devam et" else "Duraklat") {
+            autoScrollPaused = !autoScrollPaused
+            autoScrollTab?.let { injectAutoScroll(it) }
+            showAutoScrollBar()
+        }
+        bar.addView(TextView(this).apply {
+            text = "Hız ${prefs.autoScrollSpeed + 1}"
+            textSize = 12f
+            setTextColor(theme.textSecondary)
+            setPadding(dp(4), 0, dp(4), 0)
+        })
+        button("+", "Hızlandır") { changeAutoScrollSpeed(1) }
+        button("✕", "Otomatik kaydırmayı kapat") { stopAutoScroll() }
+        if (bar.visibility != View.VISIBLE || bar.alpha < 1f) fadeIn(bar, dp(12), 180)
+        bar.visibility = View.VISIBLE
+        positionFloating()
+    }
+
+    private fun changeAutoScrollSpeed(step: Int) {
+        prefs.autoScrollSpeed = (prefs.autoScrollSpeed + step).coerceIn(0, scrollSpeeds.lastIndex)
+        autoScrollTab?.let { injectAutoScroll(it) }
+        showAutoScrollBar()
+    }
+
+    // ---------------------------------------------------------------- tab groups
+
+    private val groupColors = intArrayOf(
+        Color.rgb(0xFF, 0x8A, 0xB4), Color.rgb(0x8A, 0xB4, 0xFF), Color.rgb(0x7E, 0xE0, 0xB0),
+        Color.rgb(0xFF, 0xC8, 0x6B), Color.rgb(0xC3, 0x9B, 0xFF), Color.rgb(0x6B, 0xE0, 0xE8),
+    )
+
+    private fun groupColor(name: String) = groupColors[Math.floorMod(name.hashCode(), groupColors.size)]
+
+    /** Long press on a tab in the overview: put it in a group, a new one, or take it out. */
+    private fun showGroupMenu(tab: BrowserTab) {
+        if (tab.isPrivate) return
+        val names = tabs.mapNotNull { it.group }.distinct().filter { it != tab.group }
+        val labels = names.map { "● $it" } + listOfNotNull("＋ Yeni grup…", if (tab.group != null) "Gruptan çıkar" else null)
+        AlertDialog.Builder(this, R.style.Theme_Sorune_Dialog)
+            .setTitle("Sekme grubu")
+            .setItems(labels.toTypedArray()) { _, which ->
+                when {
+                    which < names.size -> setGroup(tab, names[which])
+                    which == names.size -> askGroupName(tab)
+                    else -> setGroup(tab, null)
+                }
+            }
+            .show()
+    }
+
+    private fun askGroupName(tab: BrowserTab) {
+        val input = EditText(this).apply {
+            hint = "Grup adı, ör. Webtoon"
+            setSingleLine()
+            filters = arrayOf(android.text.InputFilter.LengthFilter(24))
+        }
+        AlertDialog.Builder(this, R.style.Theme_Sorune_Dialog)
+            .setTitle("Yeni grup")
+            .setView(FrameLayout(this).apply {
+                setPadding(dp(20), dp(8), dp(20), 0)
+                addView(input)
+            })
+            .setPositiveButton("Oluştur") { _, _ -> input.text.toString().trim().takeIf { it.isNotEmpty() }?.let { setGroup(tab, it) } }
+            .setNegativeButton("Vazgeç", null)
+            .show()
+    }
+
+    private fun setGroup(tab: BrowserTab, group: String?) {
+        tab.group = group
+        // Tabs of a group sit together.
+        if (group != null) {
+            val last = tabs.indexOfLast { it !== tab && it.group == group }
+            if (last >= 0) {
+                tabs.remove(tab)
+                tabs.add((tabs.indexOfLast { it.group == group } + 1).coerceAtMost(tabs.size), tab)
+            }
+        }
+        if (tabSwitcher.visibility == View.VISIBLE) renderTabSwitcher()
+    }
+
+    private fun closeGroup(group: String) {
+        tabs.filter { it.group == group }.forEach { closeTab(it) }
+    }
+
+    // ---------------------------------------------------------------- import from the computer
+
+    private val backupPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) importBackup(uri)
+    }
+
+    /** A .sorune backup from Sorune on the computer: bookmarks, shortcuts, history, search engine, theme. */
+    private fun importBackup(uri: Uri) = lifecycleScope.launch {
+        toast("Yedek okunuyor…")
+        val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { contentResolver.openInputStream(uri)?.use { BackupImport.read(it, cacheDir) } }
+        }
+        val backup = result.getOrNull()
+        if (backup == null) {
+            toast(if (result.isFailure) "Yedek açılamadı: ${result.exceptionOrNull()?.message}" else "Bu bir Sorune yedeği değil")
+            return@launch
+        }
+        val done = mutableListOf<String>()
+
+        val newBookmarks = backup.bookmarks.filter { !library.isBookmarked(it.first) }
+        newBookmarks.forEach { (url, title) -> library.toggleBookmark(url, title) }
+        if (newBookmarks.isNotEmpty()) done += "${newBookmarks.size} yer imi"
+
+        if (backup.history.isNotEmpty()) {
+            val known = library.history.map { it.url to it.time }.toHashSet()
+            val added = backup.history.filter { (it.url to it.time) !in known }
+            library.history.addAll(added)
+            library.history.sortByDescending { it.time }
+            while (library.history.size > Library.MAX_HISTORY) library.history.removeAt(library.history.lastIndex)
+            if (added.isNotEmpty()) done += "${added.size} geçmiş kaydı"
+        }
+        saveLibrary()
+
+        if (backup.shortcuts.isNotEmpty()) {
+            val options = runCatching { JSONObject(prefs.newTab) }.getOrDefault(JSONObject())
+            val own = options.optJSONArray("shortcuts") ?: JSONArray()
+            val urls = (0 until own.length()).map { own.getJSONObject(it).optString("url") }.toMutableSet()
+            var added = 0
+            for ((name, url) in backup.shortcuts) {
+                if (own.length() >= 16) break
+                if (urls.add(url)) {
+                    own.put(JSONObject().put("name", name).put("url", url))
+                    added++
+                }
+            }
+            prefs.newTab = options.put("shortcuts", own).toString()
+            if (added > 0) done += "$added kısayol"
+        }
+
+        backup.searchEngine?.takeIf { id -> SearchEngines.all.any { it.id == id } }?.let {
+            prefs.searchEngine = it
+            done += "arama motoru"
+        }
+
+        val wallpaper = backup.wallpaper
+        if (wallpaper != null) {
+            val id = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    val palette = CustomThemes.stage(this@MainActivity, Uri.fromFile(wallpaper))
+                    CustomThemes.create(this@MainActivity, "Bilgisayardaki tema", palette.firstOrNull() ?: theme.accent, 0.5f)
+                }.getOrNull().also { wallpaper.delete() }
+            }
+            if (id != null) {
+                prefs.themeId = id
+                done += "duvar kâğıdı (yeni tema olarak)"
+            }
+        } else {
+            backup.theme?.takeIf { id -> Themes.list(this@MainActivity).any { it.id == id } }?.let {
+                prefs.themeId = it
+                done += "tema"
+            }
+        }
+        applyTheme()
+        broadcast(config())
+        broadcast(settingsState())
+        AlertDialog.Builder(this@MainActivity, R.style.Theme_Sorune_Dialog)
+            .setTitle("Bilgisayardan aktarıldı")
+            .setMessage(if (done.isEmpty()) "Yedekte telefonda olmayan bir şey bulunamadı." else done.joinToString(", ").replaceFirstChar { it.uppercase() } + " aktarıldı.")
+            .setPositiveButton("Tamam", null)
+            .show()
+    }
+
     // ---------------------------------------------------------------- print, data saver
 
     /** The system print dialog, which also saves the page as a PDF. */
@@ -1130,7 +1459,38 @@ class MainActivity : AppCompatActivity() {
     /** Tabs two by two, each with a picture of its page; private tabs in their own group below. */
     private fun renderTabSwitcher() {
         tabList.removeAllViews()
-        addTabGrid(tabs.filter { !it.isPrivate })
+        addTabGrid(tabs.filter { !it.isPrivate && it.group == null })
+        for (group in tabs.filter { !it.isPrivate }.mapNotNull { it.group }.distinct()) {
+            val members = tabs.filter { !it.isPrivate && it.group == group }
+            tabList.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(4), dp(8), 0, dp(6))
+                addView(View(this@MainActivity).apply { background = roundRect(groupColor(group), dp(5).toFloat()) },
+                    LinearLayout.LayoutParams(dp(10), dp(10)).apply { marginEnd = dp(8) })
+                addView(TextView(this@MainActivity).apply {
+                    text = "$group (${members.size})"
+                    textSize = 16f
+                    setTextColor(theme.textPrimary)
+                    setTypeface(typeface, android.graphics.Typeface.BOLD)
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(TextView(this@MainActivity).apply {
+                    text = "Grubu kapat"
+                    textSize = 13f
+                    setTextColor(theme.accent)
+                    setPadding(dp(12), dp(10), dp(12), dp(10))
+                    background = rippleBackground()
+                    setOnClickListener { closeGroup(group) }
+                })
+            })
+            addTabGrid(members)
+        }
+        if (tabs.none { it.group != null } && tabs.count { !it.isPrivate } > 1) tabList.addView(TextView(this).apply {
+            text = "İpucu: bir sekmeye basılı tutarak gruba ekleyebilirsin."
+            textSize = 12f
+            setTextColor(theme.textSecondary)
+            setPadding(dp(4), 0, 0, dp(8))
+        })
         val privateTabs = tabs.filter { it.isPrivate }
         if (privateTabs.isEmpty()) return
         tabList.addView(LinearLayout(this).apply {
@@ -1188,6 +1548,10 @@ class MainActivity : AppCompatActivity() {
                 activate(tab)
                 hideTabSwitcher()
             }
+            setOnLongClickListener {
+                showGroupMenu(tab)
+                true
+            }
         }
         val head = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1195,6 +1559,10 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(10), 0, 0, 0)
         }
         val icon = tab.favicon.takeUnless { tab.isPrivate && privateLocked() }
+        tab.group?.let { group ->
+            head.addView(View(this).apply { background = roundRect(groupColor(group), dp(4).toFloat()) },
+                LinearLayout.LayoutParams(dp(8), dp(8)).apply { marginEnd = dp(6) })
+        }
         if (icon != null) head.addView(ImageView(this).apply { setImageBitmap(icon) }, LinearLayout.LayoutParams(dp(16), dp(16)))
         else if (tab.isPrivate) head.addView(TextView(this).apply { text = "🕶"; textSize = 12f })
         head.addView(TextView(this).apply {
@@ -1402,6 +1770,9 @@ class MainActivity : AppCompatActivity() {
         item("🖨", "PDF olarak kaydet / yazdır", web) { tab?.let { printPage(it) } }
         item("⌂", "Ana ekrana ekle", web) { tab?.let { addToHomeScreen(it) } }
         toggle("🖥", "Masaüstü sitesi", "Bu site için hatırlanır", tab?.desktopMode == true, web) { tab?.let { toggleDesktop(it) } }
+        toggle("⇣", "Otomatik kaydırma", "Dokununca durur, bırakınca devam eder", tab != null && tab === autoScrollTab, web) {
+            tab?.let { if (it === autoScrollTab) stopAutoScroll() else startAutoScroll(it) }
+        }
 
         section("Çeviri")
         item("🌐", if (tab?.translateTarget != null) "Orijinali göster" else "Sayfayı çevir (${PageTranslator.languageName(prefs.translateLanguage)})", web) {
@@ -1455,6 +1826,10 @@ class MainActivity : AppCompatActivity() {
                     if (current) theme.accent else theme.border, if (current) dp(2) else 1)
                 foreground = rippleBackground()
                 val icon = tab.favicon.takeUnless { tab.isPrivate && privateLocked() }
+                tab.group?.let { group ->
+                    addView(View(this@MainActivity).apply { background = roundRect(groupColor(group), dp(4).toFloat()) },
+                        LinearLayout.LayoutParams(dp(8), dp(8)).apply { marginEnd = dp(6) })
+                }
                 if (icon != null) addView(ImageView(this@MainActivity).apply { setImageBitmap(icon) }, LinearLayout.LayoutParams(dp(18), dp(18)))
                 else addView(TextView(this@MainActivity).apply { text = if (tab.isPrivate) "🕶" else "🌐"; textSize = 14f })
                 addView(TextView(this@MainActivity).apply {
@@ -1812,6 +2187,12 @@ class MainActivity : AppCompatActivity() {
                 broadcast(settingsState())
             }
             "setDataSaver" -> setDataSaver(message.optBoolean("value", false))
+            "setMascot" -> {
+                prefs.mascot = message.optBoolean("value", true)
+                updateMascot()
+                broadcast(settingsState())
+            }
+            "backup:import" -> runCatching { backupPicker.launch(arrayOf("*/*")) }.onFailure { toast("Dosya seçici açılamadı") }
             "setPrivateLock" -> setPrivateLock(message.optBoolean("value", false))
             "dns:open" -> openPrivateDnsSettings()
             "setDnsProvider" -> {
@@ -1928,6 +2309,7 @@ class MainActivity : AppCompatActivity() {
         .put("pullRefresh", prefs.pullRefresh)
         .put("hideToolbar", prefs.hideToolbar)
         .put("dataSaver", prefs.dataSaver)
+        .put("mascot", prefs.mascot)
         .put("privateLock", prefs.privateLock)
         .put("secureDns", prefs.secureDns)
         .put("dnsProvider", SecureDns.provider.id)
@@ -2027,8 +2409,11 @@ class MainActivity : AppCompatActivity() {
         val actions = mutableListOf<Pair<String, () -> Unit>>()
         val web = { url: String? -> url != null && url.startsWith("http") }
         if (web(link)) {
-            actions += "Yeni sekmede aç" to { openTab(link, isPrivate = tab.isPrivate); Unit }
-            actions += "Arka planda aç" to { openTab(link, activate = false, index = tabs.indexOf(tab) + 1, isPrivate = tab.isPrivate); toast("Arka planda açıldı") }
+            actions += "Yeni sekmede aç" to { openTab(link, isPrivate = tab.isPrivate).group = tab.group }
+            actions += "Arka planda aç" to {
+                openTab(link, activate = false, index = tabs.indexOf(tab) + 1, isPrivate = tab.isPrivate).group = tab.group
+                toast("Arka planda açıldı")
+            }
             if (privateSupported && !tab.isPrivate) actions += "Gizli sekmede aç" to { openTab(link, isPrivate = true); Unit }
             actions += "Bağlantıyı kopyala" to { copy(link!!) }
             actions += "Bağlantıyı paylaş" to { shareText(link!!, null) }
