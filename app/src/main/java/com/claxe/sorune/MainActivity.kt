@@ -189,6 +189,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        CrashReport.install(this)
         setContentView(R.layout.activity_main)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         prefs = Prefs(this)
@@ -242,6 +243,7 @@ class MainActivity : AppCompatActivity() {
         adBlockOn = prefs.adBlock
         SecureDns.provider = SecureDns.Provider.find(prefs.dnsProvider)
         if (prefs.secureDns) applySecureDns()
+        CrashReport.takePending(this)?.let { report -> root.post { showCrashReport(report) } }
         // A private session left over from last time (Sorune closed with private tabs open) is wiped.
         deletePrivateProfile()
         createTranslationChip()
@@ -953,6 +955,20 @@ class MainActivity : AppCompatActivity() {
         } else {
             androidx.webkit.ProxyController.getInstance().clearProxyOverride(executor) { SecureDns.stop() }
         }
+    }
+
+    /** Sorune closed unexpectedly last time: the report can be copied and sent to the developer. */
+    private fun showCrashReport(report: String) {
+        AlertDialog.Builder(this, R.style.Theme_Sorune_Dialog)
+            .setTitle("Sorune geçen sefer beklenmedik şekilde kapandı")
+            .setMessage("Raporu kopyalayıp geliştiriciye gönderirsen sebebi bulunup düzeltilebilir. Raporda sadece Sorune sürümü, telefon modeli ve hatanın teknik ayrıntısı var; açtığın sayfalar yok.")
+            .setPositiveButton("Raporu kopyala") { _, _ ->
+                getSystemService(android.content.ClipboardManager::class.java)
+                    .setPrimaryClip(android.content.ClipData.newPlainText("Sorune çökme raporu", report))
+                toast("Rapor kopyalandı")
+            }
+            .setNegativeButton("Kapat", null)
+            .show()
     }
 
     /** One line for the settings page: working, or the last time a service did not answer. */

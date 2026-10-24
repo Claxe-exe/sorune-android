@@ -20,6 +20,8 @@ import kotlin.concurrent.thread
  */
 object SecureDns {
     private var server: ServerSocket? = null
+    /** At most this many connections at once (each holds two threads); the browser itself uses far fewer. */
+    private val slots = java.util.concurrent.Semaphore(64)
     private val cache = ConcurrentHashMap<String, Pair<InetAddress, Long>>()
 
     /** Starts the proxy (only reachable from this phone) and returns its port. */
@@ -31,7 +33,17 @@ object SecureDns {
         thread(name = "sorune-secure-dns", isDaemon = true) {
             while (!socket.isClosed) {
                 val client = runCatching { socket.accept() }.getOrNull() ?: break
-                thread(isDaemon = true) { runCatching { handle(client) } }
+                if (!slots.tryAcquire()) {
+                    runCatching { client.close() }
+                    continue
+                }
+                thread(isDaemon = true) {
+                    try {
+                        runCatching { handle(client) }
+                    } finally {
+                        slots.release()
+                    }
+                }
             }
         }
         return socket.localPort
@@ -53,7 +65,10 @@ object SecureDns {
             return
         }
         val remote = runCatching {
-            Socket().apply { connect(InetSocketAddress(resolve(target.first), target.second), 15_000) }
+            Socket().apply {
+                tcpNoDelay = true
+                connect(InetSocketAddress(resolve(target.first), target.second), 15_000)
+            }
         }.getOrElse {
             output.write("HTTP/1.1 502 Bad Gateway\r\n\r\n".toByteArray())
             return
