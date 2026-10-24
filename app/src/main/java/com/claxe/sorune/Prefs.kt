@@ -74,6 +74,10 @@ class Prefs(context: Context) {
         get() = store.getBoolean("hideToolbar", true)
         set(value) = store.edit().putBoolean("hideToolbar", value).apply()
 
+    var dnsProvider: String
+        get() = store.getString("dnsProvider", "cloudflare") ?: "cloudflare"
+        set(value) = store.edit().putString("dnsProvider", value).apply()
+
     var secureDns: Boolean
         get() = store.getBoolean("secureDns", false)
         set(value) = store.edit().putBoolean("secureDns", value).apply()

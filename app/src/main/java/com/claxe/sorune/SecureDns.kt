@@ -1,6 +1,5 @@
 package com.claxe.sorune
 
-import org.json.JSONObject
 import java.io.BufferedInputStream
 import java.io.InputStream
 import java.io.OutputStream
@@ -10,19 +9,16 @@ import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.URL
-import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.thread
 
 /**
  * Secure DNS for Sorune only: a tiny proxy on the phone itself. WebView hands it its HTTPS
- * connections; it looks the site's name up over DNS-over-HTTPS (Google, reached by address, so the
- * operator's DNS is never asked) and joins the two ends. The encrypted traffic passes untouched,
+ * connections; it looks the site's name up over DNS-over-HTTPS (the chosen service, reached by address,
+ * so the operator's DNS is never asked) and joins the two ends. The encrypted traffic passes untouched,
  * and the rest of the phone keeps its own DNS.
  */
 object SecureDns {
-    private const val RESOLVER = "https://8.8.8.8/resolve"
-
     private var server: ServerSocket? = null
     private val cache = ConcurrentHashMap<String, Pair<InetAddress, Long>>()
 
@@ -105,7 +101,7 @@ object SecureDns {
         }
     }
 
-    /** DNS-over-HTTPS first; the phone's own DNS only if Google cannot be reached. */
+    /** DNS-over-HTTPS first; the phone's own DNS only if the chosen service cannot be reached. */
     private fun resolve(host: String): InetAddress {
         if (host.all { it.isDigit() || it == '.' } || ':' in host) return InetAddress.getByName(host)
         val now = System.currentTimeMillis()
@@ -116,23 +112,82 @@ object SecureDns {
         return address
     }
 
-    private fun lookup(host: String): Pair<InetAddress, Long>? {
-        for (type in listOf(1, 28)) { // A, then AAAA
-            val connection = URL("$RESOLVER?name=${URLEncoder.encode(host, "UTF-8")}&type=$type").openConnection() as HttpURLConnection
+    /** Asks the chosen service (RFC 8484, the standard every one of them speaks): A first, then AAAA. */
+    fun lookup(host: String, resolver: String = provider.url): Pair<InetAddress, Long>? {
+        for (type in intArrayOf(1, 28)) {
+            val query = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(dnsQuery(host, type))
+
+            val connection = URL("$resolver?dns=$query").openConnection() as HttpURLConnection
             connection.connectTimeout = 5000
             connection.readTimeout = 5000
+            connection.setRequestProperty("Accept", "application/dns-message")
             val body = try {
-                connection.inputStream.bufferedReader().use { it.readText() }
+                connection.inputStream.use { it.readBytes() }
             } finally {
                 connection.disconnect()
             }
-            val answers = JSONObject(body).optJSONArray("Answer") ?: continue
-            for (i in 0 until answers.length()) {
-                val answer = answers.getJSONObject(i)
-                if (answer.optInt("type") == type)
-                    return InetAddress.getByName(answer.getString("data")) to answer.optLong("TTL", 300).coerceIn(30, 3600)
-            }
+            dnsAnswer(body, type)?.let { return it }
         }
         return null
     }
+
+    private fun dnsQuery(host: String, type: Int): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        out.write(byteArrayOf(0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0)) // id 0, recursion wanted, one question
+        for (label in host.trimEnd('.').split('.')) {
+            val bytes = label.toByteArray()
+            out.write(bytes.size)
+            out.write(bytes)
+        }
+        out.write(byteArrayOf(0, 0, type.toByte(), 0, 1))
+        return out.toByteArray()
+    }
+
+    /** The first address of [type] in a DNS answer, with its lifetime in seconds. */
+    private fun dnsAnswer(message: ByteArray, type: Int): Pair<InetAddress, Long>? {
+        fun u16(at: Int) = ((message[at].toInt() and 0xff) shl 8) or (message[at + 1].toInt() and 0xff)
+        fun skipName(start: Int): Int {
+            var at = start
+            while (true) {
+                val length = message[at].toInt() and 0xff
+                if (length == 0) return at + 1
+                if (length and 0xc0 == 0xc0) return at + 2
+                at += length + 1
+            }
+        }
+        if (message.size < 12) return null
+        var at = 12
+        repeat(u16(4)) { at = skipName(at) + 4 }
+        repeat(u16(6)) {
+            at = skipName(at)
+            val recordType = u16(at)
+            val ttl = ((u16(at + 4).toLong()) shl 16) or u16(at + 6).toLong()
+            val length = u16(at + 8)
+            at += 10
+            if (recordType == type && (length == 4 || length == 16))
+                return InetAddress.getByAddress(message.copyOfRange(at, at + length)) to ttl.coerceIn(30, 3600)
+            at += length
+        }
+        return null
+    }
+
+    /** Services to choose from, reached by address where their certificate allows it (the operator's DNS is then never needed). */
+    enum class Provider(val id: String, val title: String, val note: String, val url: String, val privateDns: String) {
+        CLOUDFLARE("cloudflare", "Cloudflare", "Hızlı, Türkiye'de sunucusu var (önerilen)", "https://1.1.1.1/dns-query", "one.one.one.one"),
+        GOOGLE("google", "Google", "Hızlı ve kararlı", "https://8.8.8.8/dns-query", "dns.google"),
+        ADGUARD("adguard", "AdGuard", "Reklam ve izleyicileri de engeller", "https://94.140.14.14/dns-query", "dns.adguard-dns.com"),
+        OPENDNS("opendns", "OpenDNS", "Cisco'nun, kararlı", "https://146.112.41.2/dns-query", "one.one.one.one"),
+        DNSSB("dnssb", "DNS.SB", "Kayıt tutmaz, gizliliğe odaklı", "https://185.222.222.222/dns-query", "dot.sb");
+
+        companion object {
+            fun find(id: String?) = entries.firstOrNull { it.id == id } ?: CLOUDFLARE
+        }
+    }
+
+    @Volatile
+    var provider: Provider = Provider.CLOUDFLARE
+        set(value) {
+            field = value
+            cache.clear()
+        }
 }

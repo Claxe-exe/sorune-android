@@ -170,3 +170,20 @@
     font-size: 13px;
     font-weight: 600;
 }
+
+/* Secure DNS: one service to choose */
+.dns-list { display: grid; gap: 8px; margin-top: 12px; }
+.dns-list[hidden] { display: none; }
+.dns-list button {
+    display: grid;
+    gap: 2px;
+    text-align: left;
+    padding: 10px 14px;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+}
+.dns-list button span { font-size: 12px; color: var(--text-dim); }
+.dns-list button[aria-checked="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }

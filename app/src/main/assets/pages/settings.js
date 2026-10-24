@@ -138,6 +138,21 @@ function renderNewTab(state) {
     $("private-lock").onclick = () => send({ type: "setPrivateLock", value: !state.privateLock });
     $("secure-dns").setAttribute("aria-checked", String(Boolean(state.secureDns)));
     $("secure-dns").onclick = () => send({ type: "setSecureDns", value: !state.secureDns });
+    $("dns-providers").hidden = !state.secureDns;
+    $("dns-providers").replaceChildren(...(state.dnsProviders || []).map((provider) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.setAttribute("role", "radio");
+        button.setAttribute("aria-checked", String(provider.id === state.dnsProvider));
+        const name = document.createElement("strong");
+        name.textContent = provider.name;
+        const note = document.createElement("span");
+        note.textContent = provider.note;
+        button.append(name, note);
+        button.addEventListener("click", () => send({ type: "setDnsProvider", value: provider.id }));
+        return button;
+    }));
+    $("dns-server").textContent = ((state.dnsProviders || []).find((p) => p.id === state.dnsProvider) || {}).server || "";
     const dns = state.privateDns || {};
     $("dns-state").textContent = dns.active && dns.server
         ? `Telefonda Özel DNS açık (${dns.server}).`

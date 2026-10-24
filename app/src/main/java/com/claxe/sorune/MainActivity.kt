@@ -89,6 +89,7 @@ class MainActivity : AppCompatActivity() {
         private const val UPDATE_INTERVAL_MS = 3 * 60 * 60 * 1000L
         /** Private tabs share this profile; it is deleted (cookies, storage, cache) when the last one closes. */
         private const val PRIVATE_PROFILE = "sorune-private"
+        private const val PRIVATE_KEEP_MS = 5 * 60 * 1000L
     }
 
     /** One tab: its page and what the chrome shows for it. A private tab lives in its own browser profile. */
@@ -239,6 +240,7 @@ class MainActivity : AppCompatActivity() {
 
         wallpaper.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> fitWallpaper() }
         adBlockOn = prefs.adBlock
+        SecureDns.provider = SecureDns.Provider.find(prefs.dnsProvider)
         if (prefs.secureDns) applySecureDns()
         // A private session left over from last time (Sorune closed with private tabs open) is wiped.
         deletePrivateProfile()
@@ -315,17 +317,23 @@ class MainActivity : AppCompatActivity() {
         active?.webView?.onPause()
     }
 
+    /** When Sorune last left the screen; private tabs close if it stays away too long. */
+    private var leftAt = 0L
+
     override fun onStop() {
         super.onStop()
-        // Private tabs are one-time: leaving Sorune closes them. Not while Sorune itself sent the
-        // person away (the lock's PIN screen, picking a file to upload) or the screen only turned.
+        // Not while Sorune itself sent the person away (the lock's PIN screen, picking a file) or the screen only turned.
         if (authRunning || fileCallback != null || isChangingConfigurations) return
         privateUnlocked = false
-        closePrivateTabs()
+        leftAt = android.os.SystemClock.elapsedRealtime()
     }
+
 
     override fun onResume() {
         super.onResume()
+        // Private tabs are one-time, but a quick look elsewhere (a code in messages) keeps them.
+        if (leftAt > 0 && android.os.SystemClock.elapsedRealtime() - leftAt > PRIVATE_KEEP_MS) closePrivateTabs()
+        leftAt = 0
         active?.webView?.onResume()
         updatePrivateLock()
         broadcast(settingsState())
@@ -340,6 +348,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         tabs.forEach { it.webView.destroy() }
+        // Closing Sorune for good ends the private session too.
+        if (isFinishing) deletePrivateProfile()
         super.onDestroy()
     }
 
@@ -503,6 +513,15 @@ class MainActivity : AppCompatActivity() {
             tab.url = url
             if (tab === active) showAddress(tab)
             if (!isReload && isWebPage(url) && !tab.isPrivate) library.visit(url, tab.title)
+        }
+
+        /**
+         * The phone closed the pages' process (to free memory while Sorune was in the background,
+         * or it crashed). Without this Sorune would close too; instead the tab gets a fresh page.
+         */
+        override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
+            recoverTab(tab)
+            return true
         }
 
         override fun onPageFinished(view: WebView, url: String) {
@@ -939,8 +958,9 @@ class MainActivity : AppCompatActivity() {
     /** No app may change private DNS itself: the address goes to the clipboard and the system settings open. */
     private fun openPrivateDnsSettings() {
         val clipboard = getSystemService(android.content.ClipboardManager::class.java)
-        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("DNS", "dns.google"))
-        toast("dns.google kopyalandı: Özel DNS'e yapıştır")
+        val server = SecureDns.provider.privateDns
+        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("DNS", server))
+        toast("$server kopyalandı: Özel DNS'e yapıştır")
         val opened = runCatching { startActivity(Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)) }.isSuccess
         if (!opened) runCatching { startActivity(Intent(android.provider.Settings.ACTION_SETTINGS)) }
     }
@@ -1108,7 +1128,7 @@ class MainActivity : AppCompatActivity() {
             })
         })
         tabList.addView(TextView(this).apply {
-            text = "Sorune'den çıkınca kapanır, hiçbir şey kaydedilmez."
+            text = "Sorune'den çıkıp 5 dakika dönmezsen kapanır, hiçbir şey kaydedilmez."
             textSize = 12f
             setTextColor(theme.textSecondary)
             setPadding(dp(4), 0, 0, dp(10))
@@ -1769,6 +1789,12 @@ class MainActivity : AppCompatActivity() {
             "setDataSaver" -> setDataSaver(message.optBoolean("value", false))
             "setPrivateLock" -> setPrivateLock(message.optBoolean("value", false))
             "dns:open" -> openPrivateDnsSettings()
+            "setDnsProvider" -> {
+                val provider = SecureDns.Provider.find(message.optString("value"))
+                prefs.dnsProvider = provider.id
+                SecureDns.provider = provider
+                broadcast(settingsState())
+            }
             "setSecureDns" -> {
                 prefs.secureDns = message.optBoolean("value", false)
                 applySecureDns()
@@ -1879,11 +1905,31 @@ class MainActivity : AppCompatActivity() {
         .put("dataSaver", prefs.dataSaver)
         .put("privateLock", prefs.privateLock)
         .put("secureDns", prefs.secureDns)
+        .put("dnsProvider", SecureDns.provider.id)
+        .put("dnsProviders", JSONArray(SecureDns.Provider.entries.map {
+            JSONObject().put("id", it.id).put("name", it.title).put("note", it.note).put("server", it.privateDns)
+        }))
         .put("privateDns", privateDnsState())
         .put("autoSeconds", prefs.autoScreenSeconds)
         .put("version", BuildConfig.VERSION_NAME)
 
     // ---------------------------------------------------------------- private tabs, dark sites
+
+    /** Puts a fresh page in place of one whose process is gone, at the same address. */
+    private fun recoverTab(tab: BrowserTab) {
+        val index = tabs.indexOf(tab)
+        if (index < 0) return
+        val wasActive = tab === active
+        val url = tab.url.ifEmpty { NEW_TAB }
+        tabs.removeAt(index)
+        content.removeView(tab.webView)
+        runCatching { tab.webView.destroy() }
+        if (wasActive) active = null
+        val fresh = openTab(url, activate = wasActive, index = index, isPrivate = tab.isPrivate)
+        fresh.translateTarget = tab.translateTarget
+        fresh.preview = tab.preview
+        if (tabSwitcher.visibility == View.VISIBLE) renderTabSwitcher()
+    }
 
     /** Closes every private tab and wipes what they left behind (cookies, storage, cache). */
     private fun closePrivateTabs() {

@@ -164,7 +164,7 @@
             <div class="row" style="margin-top: 12px">
                 <div>
                     <span class="label">Gizli sekmeleri kilitle</span>
-                    <span class="hint">Gizli sekmeye geçince parmak izi, yüz ya da ekran kilidi sorulur; telefon başkasının elindeyken gizli sekmelerine giremez. Açıkken gizli sekmelerin ekran görüntüsü alınamaz. (Gizli sekmeler Sorune'den çıkınca zaten kapanır.)</span>
+                    <span class="hint">Gizli sekmeye geçince parmak izi, yüz ya da ekran kilidi sorulur; telefon başkasının elindeyken gizli sekmelerine giremez. Açıkken gizli sekmelerin ekran görüntüsü alınamaz. (Gizli sekmeler Sorune'den çıkıp 5 dakika dönmezsen zaten kapanır.)</span>
                 </div>
                 <button type="button" class="switch" id="private-lock" role="switch" aria-label="Gizli sekmeleri kilitle"></button>
             </div>
@@ -179,7 +179,8 @@
                 </div>
                 <button type="button" class="switch" id="secure-dns" role="switch" aria-label="Sorune için güvenli DNS"></button>
             </div>
-            <p class="hint" style="margin-top: 14px">Bütün telefon için istersen: telefonun <strong>Özel DNS</strong> ayarına <strong>dns.google</strong> yaz (Ağ ve internet ya da Bağlantı ve paylaşım › Özel DNS).</p>
+            <div class="dns-list" id="dns-providers" role="radiogroup" aria-label="DNS hizmeti"></div>
+            <p class="hint" style="margin-top: 14px">Bütün telefon için istersen: telefonun <strong>Özel DNS</strong> ayarına seçili hizmetin adresini (<strong id="dns-server"></strong>) yaz (Ağ ve internet ya da Bağlantı ve paylaşım › Özel DNS).</p>
             <p class="hint" id="dns-state" style="margin-top: 6px"></p>
             <button type="button" class="chip-button" id="dns-open">Adresi kopyala ve telefon ayarını aç</button>
         </section>
