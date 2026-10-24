@@ -228,6 +228,10 @@ class MainActivity : AppCompatActivity() {
             insets
         }
 
+        // Pages get no system bar insets: newer WebViews would otherwise leave their own empty
+        // strip above the navigation bar. Sorune's frame already handles the bars.
+        ViewCompat.setOnApplyWindowInsetsListener(content) { _, _ -> WindowInsetsCompat.CONSUMED }
+
         wallpaper.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> fitWallpaper() }
         adBlockOn = prefs.adBlock
         // A private session left over from last time (Sorune closed with private tabs open) is wiped.
@@ -631,9 +635,10 @@ class MainActivity : AppCompatActivity() {
         val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
         // Some phones report the gesture bar as tappable; its small height gives it away.
         val gestureNav = insets.getInsets(WindowInsetsCompat.Type.tappableElement()).bottom == 0 || nav < dp(44)
-        val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+        // Some phones report a leftover keyboard height while it is closed: ask whether it is shown.
+        val keyboard = insets.isVisible(WindowInsetsCompat.Type.ime())
         val ownPage = active?.let { !isWebPage(it.url) } ?: true
-        val bottom = if (ime > 0 || prefs.toolbarBottom || !(gestureNav || ownPage)) bars.bottom else 0
+        val bottom = if (keyboard || prefs.toolbarBottom || !(gestureNav || ownPage)) bars.bottom else 0
         if (frame.paddingBottom != bottom || frame.paddingTop != bars.top) frame.setPadding(bars.left, bars.top, bars.right, bottom)
         if (::theme.isInitialized) window.navigationBarColor = if (gestureNav) Color.TRANSPARENT else theme.base
     }
