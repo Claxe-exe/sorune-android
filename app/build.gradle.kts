@@ -19,8 +19,8 @@ android {
         // Android 10+: downloads go to the shared Downloads folder without a storage permission.
         minSdk = 29
         targetSdk = 36
-        versionCode = 700
-        versionName = "0.7.0"
+        versionCode = 701
+        versionName = "0.7.1"
         // Where the app looks for its own updates (GitHub releases of this repository).
         buildConfigField("String", "UPDATE_REPO", "\"Claxe-exe/sorune-android\"")
     }
@@ -66,6 +66,7 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.activity:activity-ktx:1.10.1")
     implementation("androidx.webkit:webkit:1.14.0")
+    implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")

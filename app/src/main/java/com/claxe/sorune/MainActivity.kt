@@ -46,6 +46,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.PopupMenu
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -311,9 +314,17 @@ class MainActivity : AppCompatActivity() {
         active?.webView?.onPause()
     }
 
+    override fun onStop() {
+        super.onStop()
+        // Leaving Sorune locks private tabs again (not while the lock prompt itself covers it).
+        if (!authRunning) privateUnlocked = false
+    }
+
     override fun onResume() {
         super.onResume()
         active?.webView?.onResume()
+        updatePrivateLock()
+        broadcast(settingsState())
         // Back from "allow installing apps": carry on with the update.
         pendingInstall?.let { apk ->
             if (packageManager.canRequestPackageInstalls() && apk.exists()) {
@@ -393,6 +404,7 @@ class MainActivity : AppCompatActivity() {
         tab.webView.visibility = View.VISIBLE
         if (changed) fadeIn(tab.webView, 0, 200)
         setToolbarShown(true)
+        updatePrivateLock()
         tab.webView.onResume()
         showAddress(tab)
         showProgress(tab)
@@ -414,7 +426,10 @@ class MainActivity : AppCompatActivity() {
         readerArticles.remove(tab.id)
         content.removeView(tab.webView)
         tab.webView.destroy()
-        if (tab.isPrivate && tabs.none { it.isPrivate }) deletePrivateProfile()
+        if (tab.isPrivate && tabs.none { it.isPrivate }) {
+            deletePrivateProfile()
+            privateUnlocked = false
+        }
         if (tabs.isEmpty()) openTab(NEW_TAB)
         else if (active === tab) activate(tabs[(index - 1).coerceAtLeast(0)])
         updateTabsButton()
@@ -794,6 +809,117 @@ class MainActivity : AppCompatActivity() {
         undoBar.animate().alpha(0f).setDuration(160).withEndAction { undoBar.visibility = View.GONE; undoBar.alpha = 1f }.start()
     }
 
+    // ---------------------------------------------------------------- private tab lock
+
+    /** Unlocked until Sorune leaves the screen or the last private tab closes. */
+    private var privateUnlocked = false
+    private var authRunning = false
+    private var lockView: LinearLayout? = null
+
+    private fun privateLocked() = prefs.privateLock && !privateUnlocked
+
+    /** Fingerprint, face or the screen lock (PIN, pattern), whichever the phone has. */
+    private fun authenticate(title: String, onSuccess: () -> Unit) {
+        if (authRunning) return
+        val allowed = BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL
+        if (BiometricManager.from(this).canAuthenticate(allowed) != BiometricManager.BIOMETRIC_SUCCESS) {
+            toast("Telefonda ekran kilidi yok: önce parmak izi ya da PIN ayarla")
+            return
+        }
+        authRunning = true
+        BiometricPrompt(this, ContextCompat.getMainExecutor(this), object : BiometricPrompt.AuthenticationCallback() {
+            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                authRunning = false
+                onSuccess()
+            }
+
+            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                authRunning = false
+            }
+        }).authenticate(BiometricPrompt.PromptInfo.Builder()
+            .setTitle(title)
+            .setSubtitle("Parmak izi, yüz ya da ekran kilidi")
+            .setAllowedAuthenticators(allowed)
+            .build())
+    }
+
+    private fun unlockPrivate() = authenticate("Gizli sekmeleri aç") {
+        privateUnlocked = true
+        updatePrivateLock()
+    }
+
+    /** A locked private tab shows a lock instead of its page; private tabs are never in screenshots while the lock is on. */
+    private fun updatePrivateLock() {
+        val tab = active
+        val secure = tab?.isPrivate == true && prefs.privateLock
+        if (secure) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        val locked = secure && privateLocked()
+        if (!locked) {
+            lockView?.visibility = View.GONE
+            return
+        }
+        val view = lockView ?: LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            isClickable = true
+            content.addView(this, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        }.also { lockView = it }
+        view.removeAllViews()
+        view.setBackgroundColor(theme.base)
+        view.addView(TextView(this).apply { text = "🔒"; textSize = 46f; gravity = Gravity.CENTER })
+        view.addView(TextView(this).apply {
+            text = "Gizli sekmeler kilitli"
+            textSize = 18f
+            gravity = Gravity.CENTER
+            setTextColor(theme.textPrimary)
+            setPadding(0, dp(10), 0, dp(18))
+        })
+        view.addView(TextView(this).apply {
+            text = "Kilidi aç"
+            textSize = 15f
+            setTextColor(theme.base)
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(dp(26), dp(12), dp(26), dp(12))
+            background = roundRect(theme.accent, dp(24).toFloat())
+            setOnClickListener { unlockPrivate() }
+        })
+        view.visibility = View.VISIBLE
+        view.bringToFront()
+        if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) unlockPrivate()
+    }
+
+    private fun setPrivateLock(on: Boolean) {
+        authenticate(if (on) "Gizli sekme kilidini aç" else "Gizli sekme kilidini kapat") {
+            prefs.privateLock = on
+            privateUnlocked = true
+            updatePrivateLock()
+            broadcast(settingsState())
+        }
+    }
+
+    // ---------------------------------------------------------------- blocked sites (private DNS)
+
+    /** The phone's private DNS: on and its server, or off. Blocks done by DNS fall away with it on. */
+    private fun privateDnsState(): JSONObject {
+        val state = JSONObject().put("active", false).put("server", "")
+        runCatching {
+            val connectivity = getSystemService(android.net.ConnectivityManager::class.java)
+            val link = connectivity.getLinkProperties(connectivity.activeNetwork) ?: return state
+            state.put("active", link.isPrivateDnsActive).put("server", link.privateDnsServerName ?: "")
+        }
+        return state
+    }
+
+    /** No app may change private DNS itself: the address goes to the clipboard and the system settings open. */
+    private fun openPrivateDnsSettings() {
+        val clipboard = getSystemService(android.content.ClipboardManager::class.java)
+        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("DNS", "dns.google"))
+        toast("dns.google kopyalandı: Özel DNS'e yapıştır")
+        val opened = runCatching { startActivity(Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)) }.isSuccess
+        if (!opened) runCatching { startActivity(Intent(android.provider.Settings.ACTION_SETTINGS)) }
+    }
+
     // ---------------------------------------------------------------- print, data saver
 
     /** The system print dialog, which also saves the page as a PDF. */
@@ -966,11 +1092,11 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(10), 0, 0, 0)
         }
-        val icon = tab.favicon
+        val icon = tab.favicon.takeUnless { tab.isPrivate && privateLocked() }
         if (icon != null) head.addView(ImageView(this).apply { setImageBitmap(icon) }, LinearLayout.LayoutParams(dp(16), dp(16)))
         else if (tab.isPrivate) head.addView(TextView(this).apply { text = "🕶"; textSize = 12f })
         head.addView(TextView(this).apply {
-            text = tab.title.ifEmpty { if (isNewTab(tab.url)) "Yeni sekme" else displayAddress(tab.url).ifEmpty { "Sorune" } }
+            text = if (tab.isPrivate && privateLocked()) "Gizli sekme" else tab.title.ifEmpty { if (isNewTab(tab.url)) "Yeni sekme" else displayAddress(tab.url).ifEmpty { "Sorune" } }
             textSize = 13f
             setTextColor(theme.textPrimary)
             maxLines = 1
@@ -986,7 +1112,7 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { closeTab(tab) }
         }, LinearLayout.LayoutParams(dp(40), dp(40)))
         card.addView(head)
-        val preview = tab.preview
+        val preview = tab.preview.takeUnless { tab.isPrivate && privateLocked() }
         if (preview != null) {
             card.addView(ImageView(this).apply {
                 setImageBitmap(preview)
@@ -1225,11 +1351,11 @@ class MainActivity : AppCompatActivity() {
                 background = roundRect(ColorUtils.setAlphaComponent(theme.base, 200), dp(14).toFloat(),
                     if (current) theme.accent else theme.border, if (current) dp(2) else 1)
                 foreground = rippleBackground()
-                val icon = tab.favicon
+                val icon = tab.favicon.takeUnless { tab.isPrivate && privateLocked() }
                 if (icon != null) addView(ImageView(this@MainActivity).apply { setImageBitmap(icon) }, LinearLayout.LayoutParams(dp(18), dp(18)))
                 else addView(TextView(this@MainActivity).apply { text = if (tab.isPrivate) "🕶" else "🌐"; textSize = 14f })
                 addView(TextView(this@MainActivity).apply {
-                    text = tab.title.ifBlank { displayAddress(tab.url).ifBlank { "Yeni sekme" } }
+                    text = if (tab.isPrivate && privateLocked()) "Gizli sekme" else tab.title.ifBlank { displayAddress(tab.url).ifBlank { "Yeni sekme" } }
                     textSize = 13f
                     setTextColor(if (current) theme.textPrimary else theme.textSecondary)
                     maxLines = 1
@@ -1395,7 +1521,7 @@ class MainActivity : AppCompatActivity() {
             toast("Ana ekranın kısayol eklemeyi desteklemiyor")
             return
         }
-        val icon = tab.favicon?.let { androidx.core.graphics.drawable.IconCompat.createWithBitmap(it) }
+        val icon = tab.favicon.takeUnless { tab.isPrivate && privateLocked() }?.let { androidx.core.graphics.drawable.IconCompat.createWithBitmap(it) }
             ?: androidx.core.graphics.drawable.IconCompat.createWithResource(this, R.mipmap.ic_launcher)
         val shortcut = androidx.core.content.pm.ShortcutInfoCompat.Builder(this, "site-" + tab.url.hashCode())
             .setShortLabel(tab.title.ifBlank { hostOf(tab.url) ?: "Sorune" }.take(24))
@@ -1581,6 +1707,8 @@ class MainActivity : AppCompatActivity() {
                 broadcast(settingsState())
             }
             "setDataSaver" -> setDataSaver(message.optBoolean("value", false))
+            "setPrivateLock" -> setPrivateLock(message.optBoolean("value", false))
+            "dns:open" -> openPrivateDnsSettings()
             "setPullRefresh" -> {
                 prefs.pullRefresh = message.optBoolean("value", false)
                 broadcast(settingsState())
@@ -1684,6 +1812,8 @@ class MainActivity : AppCompatActivity() {
         .put("pullRefresh", prefs.pullRefresh)
         .put("hideToolbar", prefs.hideToolbar)
         .put("dataSaver", prefs.dataSaver)
+        .put("privateLock", prefs.privateLock)
+        .put("privateDns", privateDnsState())
         .put("autoSeconds", prefs.autoScreenSeconds)
         .put("version", BuildConfig.VERSION_NAME)
 

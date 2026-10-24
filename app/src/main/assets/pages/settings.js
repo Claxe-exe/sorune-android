@@ -134,6 +134,14 @@ function renderNewTab(state) {
     $("hide-toolbar").onclick = () => send({ type: "setHideToolbar", value: !state.hideToolbar });
     $("data-saver").setAttribute("aria-checked", String(Boolean(state.dataSaver)));
     $("data-saver").onclick = () => send({ type: "setDataSaver", value: !state.dataSaver });
+    $("private-lock").setAttribute("aria-checked", String(Boolean(state.privateLock)));
+    $("private-lock").onclick = () => send({ type: "setPrivateLock", value: !state.privateLock });
+    const dns = state.privateDns || {};
+    $("dns-state").textContent = dns.active && dns.server
+        ? `Özel DNS açık (${dns.server}): DNS engelleri aşılıyor.`
+        : dns.active
+            ? "Özel DNS otomatikte: operatörün DNS'i kullanılıyor, engeller kalır."
+            : "Özel DNS kapalı: operatörün DNS'i kullanılıyor, engeller kalır.";
 }
 
 $("hour12").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setNewTab("hour12", b.dataset.value === "12"); });
@@ -149,6 +157,8 @@ $("nt-reset").addEventListener("click", () => {
 let draggingZoom = false;
 $("text-zoom").addEventListener("input", () => { draggingZoom = true; $("text-zoom-label").textContent = `Yazı boyutu %${$("text-zoom").value}`; });
 $("text-zoom").addEventListener("change", () => { draggingZoom = false; send({ type: "setTextZoom", value: Number($("text-zoom").value) }); });
+$("dns-open").addEventListener("click", () => send({ type: "dns:open" }));
+
 $("tabs-place").addEventListener("click", (event) => {
     const button = event.target.closest("button");
     if (button) send({ type: "setTabsPlace", value: button.dataset.value });

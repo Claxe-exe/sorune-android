@@ -161,6 +161,20 @@
                 </div>
                 <button type="button" class="switch" id="data-saver" role="switch" aria-label="Veri tasarrufu"></button>
             </div>
+            <div class="row" style="margin-top: 12px">
+                <div>
+                    <span class="label">Gizli sekmeleri kilitle</span>
+                    <span class="hint">Gizli sekmeye geçince parmak izi, yüz ya da ekran kilidi sorulur. Sorune'den çıkınca yeniden kilitlenir; açıkken gizli sekmelerin ekran görüntüsü alınamaz.</span>
+                </div>
+                <button type="button" class="switch" id="private-lock" role="switch" aria-label="Gizli sekmeleri kilitle"></button>
+            </div>
+        </section>
+
+        <section class="card">
+            <h2>Engelli siteler</h2>
+            <p class="hint">Türkiye'deki erişim engellerinin çoğu DNS ile yapılır. Telefonun <strong>Özel DNS</strong> ayarına <strong>dns.google</strong> yazınca bu engeller kalkar; Sorune dahil bütün uygulamalarda geçerli olur. Ayarlarda: Ağ ve internet (ya da Bağlantı ve paylaşım) › Özel DNS › Özel DNS sağlayıcı ana makine adı. Başka yöntemle engellenen birkaç sitede işe yaramaz.</p>
+            <p class="hint" id="dns-state" style="margin-top: 10px"></p>
+            <button type="button" class="chip-button" id="dns-open">Adresi kopyala ve ayarı aç</button>
         </section>
 
         <section class="card">
