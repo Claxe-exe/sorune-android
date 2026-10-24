@@ -18,6 +18,8 @@ kurulur kurulmaz çalışsın diye bulunurlar. Yeniden kullanım için lisanslan
 |---|---|
 | `src/Claxe/Assets/Themes/*.jpg`, `src/Claxe/Assets/Themes/thumbs/*.jpg` | Theme wallpapers / Tema duvar kâğıtları |
 | `src/Claxe/Assets/Mascot/*.png` | Mascot / Maskot |
+| `app/src/main/assets/themes/*.jpg`, `app/src/main/assets/themes/thumbs/*` | Theme wallpapers (Android) / Tema duvar kâğıtları (Android) |
+| `app/src/main/res/drawable-nodpi/mascot_*.png` | Mascot (Android) / Maskot (Android) |
 | `src/Claxe/Assets/claxe.ico`, `src/Claxe/Assets/claxe-256.png` | App icon / Uygulama simgesi |
 | `docs/screenshots/*.png` | Screenshots showing the artwork above / Bu görselleri içeren ekran görüntüleri |
 
